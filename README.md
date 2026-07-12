@@ -75,24 +75,26 @@ Without `position`, the widget renders inline and fills its parent container (gi
 
 ## Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `api` | `ApiConfig` | required | API key or proxy endpoint (see below) |
-| `orgName` | `string` | `"AI Tutor"` | Organization name in the header |
-| `logoUrl` | `string` | — | Logo shown in the header instead of the letter avatar |
-| `primaryColor` | `string` | `"#007AFF"` | Accent color — user bubbles, send button, active states |
-| `secondaryColor` | `string` | `"#5856D6"` | Gradient partner — level ring, avatar, badges |
-| `curriculum` | `Curriculum` | demo curriculum | Your custom curriculum — see CUSTOMIZATION.md |
-| `model` | `string` | `"claude-haiku-4-5-20251001"` | Claude model to use |
-| `systemPrompt` | `string` | Built-in Socratic prompt | Override the AI's behavior entirely |
-| `placeholder` | `string` | `"Ask a question…"` | Chat input placeholder |
-| `defaultModality` | `Modality` | `"reading"` | Starting example style: `reading \| visual \| audio \| images \| hands-on` |
-| `position` | `ChatPosition` | — | Dock as a floating launcher: `bottom-right \| bottom-left \| top-right \| top-left`. Omit for inline |
-| `onClose` | `() => void` | — | Called on the close (✕) button. If omitted (and not floating), the button is hidden |
-| `user` | `TutorUser` | — | Signed-in learner: `{ id, name, gameName }` — see below |
-| `initialProgress` | `TutorProgress` | — | Progress to restore on mount (from your backend) |
-| `onProgressChange` | `(p: TutorProgress) => void` | — | Fires when progress changes so you can persist it |
-| `className` | `string` | — | Optional CSS class on the root element |
+Only `api` is required. Everything else is optional.
+
+| Prop | Required | Type | Default | Description |
+|------|----------|------|---------|-------------|
+| `api` | **Yes** | `ApiConfig` | — | API key or proxy endpoint. Exactly one of `apiKey` / `apiEndpoint` (see below) |
+| `orgName` | no | `string` | `"AI Tutor"` | Organization name in the header |
+| `logoUrl` | no | `string` | — | Logo shown in the header instead of the letter avatar |
+| `primaryColor` | no | `string` | `"#007AFF"` | Accent color — user bubbles, send button, active states |
+| `secondaryColor` | no | `string` | `"#5856D6"` | Gradient partner — level ring, avatar, badges |
+| `curriculum` | no | `Curriculum` | demo curriculum | Your custom curriculum — see CUSTOMIZATION.md |
+| `model` | no | `string` | `"claude-haiku-4-5-20251001"` | Claude model to use |
+| `systemPrompt` | no | `string` | Built-in Socratic prompt | Override the AI's behavior entirely |
+| `placeholder` | no | `string` | `"Ask a question…"` | Chat input placeholder |
+| `defaultModality` | no | `Modality` | `"reading"` | Starting example style: `reading \| visual \| audio \| images \| hands-on` |
+| `position` | no | `ChatPosition` | — | Dock as a floating launcher: `bottom-right \| bottom-left \| top-right \| top-left`. Omit for inline |
+| `onClose` | no | `() => void` | — | Called on the close (✕) button. If omitted (and not floating), the button is hidden |
+| `user` | no | `TutorUser` | — | Signed-in learner: `{ id, name, gameName }` — see below |
+| `initialProgress` | no | `TutorProgress` | — | Progress to restore on mount (from your backend) |
+| `onProgressChange` | no | `(p: TutorProgress) => void` | — | Fires when progress changes so you can persist it |
+| `className` | no | `string` | — | Optional CSS class on the root element |
 
 ---
 
