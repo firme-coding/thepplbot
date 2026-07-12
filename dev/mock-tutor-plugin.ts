@@ -35,34 +35,46 @@ function facts(content: string): string[] {
 
 const words = (s: string) => s.toLowerCase().match(/[a-z]{4,}/g) ?? [];
 
-/** Pick the fact that best overlaps the learner's question. */
-function pickFact(pool: string[], question: string): string {
+/** Rank facts by keyword overlap with the question (best first). */
+function rankFacts(pool: string[], question: string): { fact: string; score: number }[] {
   const q = new Set(words(question));
-  let best = pool[0] ?? "";
-  let bestScore = -1;
-  for (const f of pool) {
-    const score = words(f).filter((w) => q.has(w)).length;
-    if (score > bestScore) {
-      bestScore = score;
-      best = f;
-    }
-  }
-  return best;
+  return pool
+    .map((fact) => ({ fact, score: words(fact).filter((w) => q.has(w)).length }))
+    .sort((a, b) => b.score - a.score);
 }
 
+const MATCH_LEADS = [
+  "Good question — here's what this lesson says about that:",
+  "Let's look at what the material tells us:",
+  "Here's the relevant piece:",
+];
+const NOMATCH_LEADS = [
+  "We haven't hit that exact point, but here's what this lesson covers:",
+  "That's a little outside this bit — but here's what we're working with:",
+];
 const FOLLOWUPS = [
   "What do you make of that?",
-  "Why do you think that is?",
-  "Want to dig into that a little more?",
-  "What stands out to you there?",
+  "Why do you think that mattered?",
+  "Want to dig into any of those?",
+  "Which part stands out to you?",
 ];
 
 function buildReply(systemPrompt: string, question: string, userTurns: number): string {
   const pool = facts(extractContent(systemPrompt));
   if (!pool.length) return "Tell me a bit about what you'd like to explore, and we'll start there.";
-  const fact = pickFact(pool, question);
-  const fu = FOLLOWUPS[Math.max(0, userTurns - 1) % FOLLOWUPS.length];
-  return `Here's a thread from the material to pull on:\n\n- ${fact}\n\n${fu}`;
+
+  const ranked = rankFacts(pool, question);
+  const matched = ranked.filter((r) => r.score > 0);
+  const hit = matched.length > 0;
+
+  // Top 2–3 relevant facts (or the first few if nothing matched), de-duplicated.
+  const chosen = (hit ? matched : ranked).slice(0, 3).map((r) => r.fact);
+  const unique = [...new Set(chosen)];
+
+  const pick = <T,>(arr: T[]) => arr[Math.max(0, userTurns - 1) % arr.length];
+  const lead = hit ? pick(MATCH_LEADS) : pick(NOMATCH_LEADS);
+  const body = unique.map((f) => `- ${f}`).join("\n");
+  return `${lead}\n\n${body}\n\n${pick(FOLLOWUPS)}`;
 }
 
 export function mockTutorApi(): Plugin {
