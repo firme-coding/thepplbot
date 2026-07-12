@@ -2,38 +2,67 @@ import type { Plugin } from "vite";
 
 // Dev-only mock of the /api/tutor proxy endpoint.
 //
-// Lets you see the widget's full request → typing → reply flow without a real
-// Anthropic API key. `apply: "serve"` means it ONLY runs under `npm run dev` —
-// it is never part of the library build.
+// `apply: "serve"` means it ONLY runs under `npm run dev` — never in the build.
+//
+// It is CURRICULUM-AWARE: the widget sends the active module's content inside
+// `systemPrompt`, and this mock answers from THAT text. So whatever course /
+// curriculum is loaded (Firme demo, French Quarter, your own) drives the reply —
+// no per-module hardcoding, no key needed.
 
-const CANNED: Record<string, string[]> = {
-  about: [
-    "Good question. Before I answer — what made you curious about Firme Coding? Is it the software work, or the people behind it?",
-    "Firme is a team of developers building real production software, and a lot of us learned to build after being counted out. We ship websites, maintain them, and build custom platforms. Which of those is closest to what you need?",
-  ],
-  websites: [
-    "Happy to help. Are you starting a brand-new site, or replacing one you already have?",
-    "Firme builds custom sites — designed to your brand, fast, mobile-first, with the SEO basics done properly. Rough sense of how many pages you're imagining?",
-  ],
-  maintenance: [
-    "Great — maintenance is the part people forget until something breaks. Do you have a site live right now that needs looking after?",
-    "The monthly plan covers security patches, uptime monitoring, backups, and content updates — you email what you need, it gets done. Want me to walk through what a typical month looks like?",
-  ],
-  platform: [
-    "Custom platforms are my favorite topic. What's the process you're trying to replace — a spreadsheet, a manual workflow, something else?",
-    "Firme builds admin dashboards, member portals, and workflow tools tailored to how you actually work. We even built our own to run our training program. What would yours need to track?",
-  ],
-  donate: [
-    "That means a lot. Donations fund laptops, instruction, and mentorship so the program stays free for the people who need it. Want the link?",
-    "You can give at firmecoding.org/donate — every dollar opens a door for someone who's been counted out. Thank you for even asking.",
-  ],
-};
+/** Everything after the "— CONTENT —" marker is the active module's content. */
+function extractContent(systemPrompt: string): string {
+  const marker = "— CONTENT —";
+  const idx = systemPrompt.lastIndexOf(marker);
+  return (idx >= 0 ? systemPrompt.slice(idx + marker.length) : systemPrompt).trim();
+}
 
-function replyFor(mod: string, turnCount: number): string {
-  const lines = CANNED[mod] ?? [
-    "That's a bit outside what I can cover here — but ask me about Firme's websites, maintenance, or custom platform work and I've got you.",
-  ];
-  return lines[Math.min(turnCount, lines.length - 1)];
+/** Break the module content into short, quotable facts (overview + bullets). */
+function facts(content: string): string[] {
+  const bullets = content
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("-"))
+    .map((l) => l.replace(/^-\s*/, "").replace(/\s+/g, " ").trim());
+  const overview = (content.match(/Overview:\s*([\s\S]*?)(?:\n\s*\n|$)/i)?.[1] ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentences = overview
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 20);
+  return [...sentences, ...bullets].filter((f) => f.length >= 12);
+}
+
+const words = (s: string) => s.toLowerCase().match(/[a-z]{4,}/g) ?? [];
+
+/** Pick the fact that best overlaps the learner's question. */
+function pickFact(pool: string[], question: string): string {
+  const q = new Set(words(question));
+  let best = pool[0] ?? "";
+  let bestScore = -1;
+  for (const f of pool) {
+    const score = words(f).filter((w) => q.has(w)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = f;
+    }
+  }
+  return best;
+}
+
+const FOLLOWUPS = [
+  "What do you make of that?",
+  "Why do you think that is?",
+  "Want to dig into that a little more?",
+  "What stands out to you there?",
+];
+
+function buildReply(systemPrompt: string, question: string, userTurns: number): string {
+  const pool = facts(extractContent(systemPrompt));
+  if (!pool.length) return "Tell me a bit about what you'd like to explore, and we'll start there.";
+  const fact = pickFact(pool, question);
+  const fu = FOLLOWUPS[Math.max(0, userTurns - 1) % FOLLOWUPS.length];
+  return `Here's a thread from the material to pull on:\n\n- ${fact}\n\n${fu}`;
 }
 
 export function mockTutorApi(): Plugin {
@@ -49,18 +78,19 @@ export function mockTutorApi(): Plugin {
         let body = "";
         req.on("data", (chunk) => (body += chunk));
         req.on("end", () => {
-          let mod = "about";
+          let systemPrompt = "";
+          let question = "";
           let userTurns = 0;
           try {
             const parsed = JSON.parse(body || "{}");
-            mod = parsed.module ?? "about";
-            userTurns = (parsed.messages ?? []).filter(
-              (m: { role: string }) => m.role === "user",
-            ).length;
+            systemPrompt = parsed.systemPrompt ?? "";
+            const msgs = (parsed.messages ?? []) as { role: string; content: string }[];
+            userTurns = msgs.filter((m) => m.role === "user").length;
+            question = [...msgs].reverse().find((m) => m.role === "user")?.content ?? "";
           } catch {
             /* ignore malformed body — fall back to defaults */
           }
-          const reply = replyFor(mod, userTurns - 1);
+          const reply = buildReply(systemPrompt, question, userTurns);
           // Small delay so the typing indicator is visible
           setTimeout(() => {
             res.setHeader("Content-Type", "application/json");
