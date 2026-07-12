@@ -209,6 +209,23 @@ import type { TutorProgress } from "thepplbot";
 
 ---
 
+## Releasing
+
+A GitHub Action (`.github/workflows/publish.yml`) publishes to npm automatically whenever you push a version tag — no OTP prompt.
+
+One-time setup: add an npm token as a repo secret named `NPM_TOKEN` (see below).
+
+Then every release is:
+
+```bash
+npm version patch     # or minor / major — bumps package.json, commits, tags
+git push --follow-tags
+```
+
+The Action checks out the tag, runs `npm test`, verifies the tag matches `package.json`, and publishes with provenance.
+
+---
+
 ## Development
 
 ```bash

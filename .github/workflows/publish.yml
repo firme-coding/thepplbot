@@ -1,0 +1,39 @@
+name: Publish to npm
+
+# Publishes whenever you push a version tag (e.g. v0.1.2).
+# Bump + tag + push with:  npm version patch && git push --follow-tags
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # enables npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      - run: npm test
+
+      # Fails clearly if the tag doesn't match package.json (e.g. tag v0.1.2 but pkg says 0.1.1)
+      - name: Check tag matches package.json version
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG=${GITHUB_REF_NAME#v}
+          if [ "$PKG" != "$TAG" ]; then
+            echo "Tag $TAG does not match package.json $PKG"; exit 1
+          fi
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
