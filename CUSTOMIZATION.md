@@ -254,6 +254,71 @@ app.post("/api/tutor", async (req, res) => {
 
 ---
 
+## Real images (Unsplash)
+
+The **images** modality tells Claude to suggest images, and the widget renders any
+Markdown image (`![alt](url)`) in a reply. But Claude doesn't have real photo URLs —
+so to show actual pictures, fetch one in your **proxy** and append it to the reply.
+
+The widget encodes the active modality in `systemPrompt` (a line like
+`PREFERRED EXPLANATION STYLE — Images: …`), so the proxy can tell when images are
+wanted.
+
+1. Get a free **Access Key** at [unsplash.com/developers](https://unsplash.com/developers) and set it as `UNSPLASH_ACCESS_KEY`.
+2. In your `/api/tutor` route, when images mode is on, search Unsplash for the topic and append the photo as Markdown:
+
+```ts
+// app/api/tutor/route.ts (Next.js)
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+async function unsplashImage(query: string): Promise<string | null> {
+  const res = await fetch(
+    `https://api.unsplash.com/search/photos?per_page=1&query=${encodeURIComponent(query)}`,
+    { headers: { Authorization: `Client-ID ${process.env.UNSPLASH_ACCESS_KEY}` } },
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const photo = data.results?.[0];
+  if (!photo) return null;
+  // Markdown image + attribution link (Unsplash guidelines ask for credit).
+  return `![${photo.alt_description ?? query}](${photo.urls.small})\n\n_Photo by [${photo.user.name}](${photo.user.links.html}?utm_source=thepplbot&utm_medium=referral) on [Unsplash](https://unsplash.com/?utm_source=thepplbot&utm_medium=referral)_`;
+}
+
+export async function POST(req: Request) {
+  const { systemPrompt, messages } = await req.json();
+  const wantsImage = /PREFERRED EXPLANATION STYLE — Images/i.test(systemPrompt);
+
+  const res = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages,
+  });
+  let reply = res.content.find((b) => b.type === "text")?.text ?? "";
+
+  if (wantsImage) {
+    // Use the learner's last question as the search query.
+    const query = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    const img = await unsplashImage(query);
+    if (img) reply = `${img}\n\n${reply}`;
+  }
+
+  return Response.json({ reply });
+}
+```
+
+That's it — no widget changes. When the learner is in images mode, the reply now
+leads with a real photo, which the widget renders inline.
+
+**Notes:**
+- Unsplash's free tier allows 50 requests/hour (demo) — apply for production limits when you launch.
+- Their guidelines require crediting the photographer; the snippet appends that automatically.
+- Prefer generated images instead? Swap `unsplashImage` for a call to your image-generation provider and return a Markdown image the same way.
+
+---
+
 ## Questions?
 
 Open an issue on the [GitHub repo](https://github.com/firme-coding/thepplbot) or reach out at [firmecoding.org](https://firmecoding.org).

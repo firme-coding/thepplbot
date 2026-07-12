@@ -17,7 +17,7 @@ The bundled demo content is a live tour of [Firme Coding](https://firmecoding.or
   - **Chat** — Socratic tutor grounded in your curriculum.
   - **Typing** — a typing drill built from the module's own key terms, scored on WPM + accuracy.
   - **Progress** — level ring, XP, module mastery, and badges.
-- **Learning modalities** — reading · visual · audio · images · hands-on. Picking one tailors how the tutor explains.
+- **Learning modalities** — reading · visual · audio · images · hands-on. Picking one tailors how the tutor explains. Audio is spoken via the browser; for real photos in *images* mode, see the [Unsplash recipe](./CUSTOMIZATION.md#real-images-unsplash).
 - **Gamification** — earn XP from questions and typing, level up, master modules, unlock badges. Progress persists in `localStorage`.
 - **Expand & close** — resize the widget or dismiss it via the `onClose` prop.
 - **Bring your own model & curriculum** — any Claude model, any content.
