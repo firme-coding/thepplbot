@@ -4,6 +4,8 @@ An embeddable, iOS-style AI tutor widget for any React site. Swap in your colors
 
 The bundled demo content is a live tour of [Firme Coding](https://firmecoding.org) — a team of developers, including formerly incarcerated engineers, building production software for businesses and nonprofits.
 
+> **New here?** Start with the step-by-step **[Getting Started guide](./GETTING_STARTED.md)**. This README is the full reference.
+
 ---
 
 ## Features
@@ -34,26 +36,11 @@ React 18+ is required as a peer dependency.
 
 ## Get an Anthropic API key
 
-The widget talks to Claude, so you need a key from Anthropic. It's pay-as-you-go (you're billed for what you use), and testing this widget costs pennies.
+The widget talks to Claude, so you need a key from [console.anthropic.com](https://console.anthropic.com): sign up, add billing credits, then **Settings → API Keys → Create Key** and copy it (shown once, looks like `sk-ant-api03-…`).
 
-1. Go to **[console.anthropic.com](https://console.anthropic.com)** and sign up (or log in).
-2. Add a payment method / credits: **Settings → Billing**. Without credits, API calls return an error. A few dollars is plenty to start.
-3. Open **Settings → API Keys** → **Create Key**. Give it a name (e.g. `thepplbot-dev`) and click create.
-4. **Copy the key now** — it looks like `sk-ant-api03-XXXX…` and is shown only once. If you lose it, just make a new one.
-5. Store it safely (see below). **Never** paste it into your React code or commit it to git.
+Store it in `.env.local` for dev (and gitignore it). **Never** ship a key to the browser on a public site — use the [proxy setup](#api-config) instead.
 
-### Where to put the key
-
-**Local development** — create a file called `.env.local` in your project root:
-
-```bash
-# .env.local  (Vite projects)
-VITE_ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
-```
-
-Add `.env.local` to your `.gitignore` so it's never committed. Read it with `import.meta.env.VITE_ANTHROPIC_API_KEY` (Vite) or `process.env.NEXT_PUBLIC_...` (Next.js — but see the warning below).
-
-> ⚠️ **Anything sent to the browser is public.** A key in front-end code can be stolen and run up your bill. Use a browser key **only** for local dev or a login-gated internal tool. For any public site, use the **proxy** setup in [API config](#api-config) — your key stays on your server.
+Full walkthrough with screenshots-level detail: **[GETTING_STARTED.md](./GETTING_STARTED.md)**.
 
 ---
 

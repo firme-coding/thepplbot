@@ -32,6 +32,7 @@
   "files": [
     "dist",
     "README.md",
+    "GETTING_STARTED.md",
     "CUSTOMIZATION.md"
   ],
   "scripts": {
