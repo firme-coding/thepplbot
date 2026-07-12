@@ -6,9 +6,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/thepplbot"
+    "url": "https://github.com/firme-coding/thepplbot"
   },
-  "homepage": "https://github.com/your-username/thepplbot#readme",
+  "homepage": "https://github.com/firme-coding/thepplbot#readme",
   "type": "module",
   "main": "dist/thepplbot.umd.cjs",
   "module": "dist/thepplbot.js",

@@ -191,6 +191,6 @@ app.post("/api/tutor", async (req, res) => {
 
 ## Questions?
 
-Open an issue on the [GitHub repo](https://github.com/your-username/thepplbot) or reach out at [firmecoding.org](https://firmecoding.org).
+Open an issue on the [GitHub repo](https://github.com/firme-coding/thepplbot) or reach out at [firmecoding.org](https://firmecoding.org).
 
 Maintained by [Firme Coding](https://firmecoding.org) — built by formerly incarcerated developers, for communities building their future in tech. Use it well, and consider [donating](https://firmecoding.org/donate).
