@@ -65,7 +65,7 @@ export default function MyPage() {
 
 The widget ships with a demo curriculum loaded by default. Swap in your own — see [CUSTOMIZATION.md](./CUSTOMIZATION.md).
 
-> **No bundler?** Once published, it's served on a CDN: `https://unpkg.com/thepplbot`.
+> **CDN / no install?** It's an ES module on unpkg: `import { AITutor } from "https://unpkg.com/thepplbot"` inside a `<script type="module">`.
 
 ---
 
@@ -188,6 +188,14 @@ const MY_CURRICULUM: Curriculum = {
 };
 
 <AITutor api={{ apiEndpoint: "/api/tutor" }} curriculum={MY_CURRICULUM} />
+```
+
+A ready-made 7-module example ships with the package — import it to try a full curriculum or use as a template:
+
+```tsx
+import { FRENCH_QUARTER_CURRICULUM } from "thepplbot/curriculum-french-quarter";
+
+<AITutor api={{ apiEndpoint: "/api/tutor" }} curriculum={FRENCH_QUARTER_CURRICULUM} />
 ```
 
 See [CUSTOMIZATION.md](./CUSTOMIZATION.md) for the full guide, including prompting Claude for different use cases.

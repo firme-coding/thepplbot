@@ -13,20 +13,18 @@ export default defineConfig({
   ],
   build: {
     lib: {
-      entry: resolve(__dirname, "src/index.ts"),
-      name: "ThePplBot",
-      fileName: "thepplbot",
+      // Multiple entries → main widget + importable curricula subpaths.
+      entry: {
+        thepplbot: resolve(__dirname, "src/index.ts"),
+        "curriculum-french-quarter": resolve(__dirname, "src/curriculum-french-quarter.ts"),
+      },
+      // ESM + CJS (UMD/iife don't support multiple entries).
+      formats: ["es", "cjs"],
+      fileName: (format, entryName) => `${entryName}.${format === "es" ? "js" : "cjs"}`,
     },
     rollupOptions: {
       // React is a peer dep — don't bundle it
       external: ["react", "react-dom", "react/jsx-runtime"],
-      output: {
-        globals: {
-          react: "React",
-          "react-dom": "ReactDOM",
-          "react/jsx-runtime": "ReactJSXRuntime",
-        },
-      },
     },
     // Keep CSS in the JS bundle so consumers don't need a separate import
     cssCodeSplit: false,

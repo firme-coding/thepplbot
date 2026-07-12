@@ -215,5 +215,3 @@ Notes for the assistant:
 `,
   },
 };
-
-export default FRENCH_QUARTER_CURRICULUM;

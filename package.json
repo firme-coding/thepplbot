@@ -19,14 +19,19 @@
   },
   "homepage": "https://github.com/firme-coding/thepplbot#readme",
   "type": "module",
-  "main": "dist/thepplbot.umd.cjs",
+  "main": "dist/thepplbot.cjs",
   "module": "dist/thepplbot.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/thepplbot.js",
-      "require": "./dist/thepplbot.umd.cjs",
+      "require": "./dist/thepplbot.cjs",
       "types": "./dist/index.d.ts"
+    },
+    "./curriculum-french-quarter": {
+      "import": "./dist/curriculum-french-quarter.js",
+      "require": "./dist/curriculum-french-quarter.cjs",
+      "types": "./dist/curriculum-french-quarter.d.ts"
     }
   },
   "files": [
