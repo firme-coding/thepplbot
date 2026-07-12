@@ -33,6 +33,28 @@ export interface ChatMessage {
   id: string;
 }
 
+/**
+ * The signed-in learner, supplied by the host app. All fields optional so the
+ * widget still works anonymously.
+ */
+export interface TutorUser {
+  /** Stable id from your platform. Used to key saved progress per person. */
+  id?: string;
+  /** The learner's real name. The tutor addresses them by it. Edit it in your
+   *  platform's settings and pass the new value — the widget is read-only. */
+  name?: string;
+  /** Public display handle shown in the widget (header + progress view). */
+  gameName?: string;
+}
+
+/** Gamification progress the host can persist and restore across devices. */
+export interface TutorProgress {
+  /** Questions asked per module key. */
+  counts: Record<string, number>;
+  /** XP earned from typing practice. */
+  typingXp: number;
+}
+
 /** Config for calling Claude directly or via your own proxy */
 export type ApiConfig =
   | {
@@ -96,4 +118,22 @@ export interface AITutorProps extends BrandConfig {
    * inline, filling the parent container.
    */
   position?: ChatPosition;
+  /**
+   * The signed-in learner (id, name, gameName). Pass this from your platform.
+   * `name` is used to address the learner; `gameName` shows in the UI; `id`
+   * keys their saved progress.
+   */
+  user?: TutorUser;
+  /**
+   * Progress to restore on mount (from your backend). Seeds XP/levels/mastery.
+   * To load it asynchronously, mount the widget after it resolves, or pass a
+   * changing `key` (e.g. the userId) so it re-seeds.
+   */
+  initialProgress?: TutorProgress;
+  /**
+   * Called whenever progress changes (a question asked, typing XP earned).
+   * Persist it in your backend keyed by the user. When provided, the widget
+   * stops writing to localStorage and treats your store as the source of truth.
+   */
+  onProgressChange?: (progress: TutorProgress) => void;
 }

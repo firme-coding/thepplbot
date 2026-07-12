@@ -89,6 +89,9 @@ Without `position`, the widget renders inline and fills its parent container (gi
 | `defaultModality` | `Modality` | `"reading"` | Starting example style: `reading \| visual \| audio \| images \| hands-on` |
 | `position` | `ChatPosition` | — | Dock as a floating launcher: `bottom-right \| bottom-left \| top-right \| top-left`. Omit for inline |
 | `onClose` | `() => void` | — | Called on the close (✕) button. If omitted (and not floating), the button is hidden |
+| `user` | `TutorUser` | — | Signed-in learner: `{ id, name, gameName }` — see below |
+| `initialProgress` | `TutorProgress` | — | Progress to restore on mount (from your backend) |
+| `onProgressChange` | `(p: TutorProgress) => void` | — | Fires when progress changes so you can persist it |
 | `className` | `string` | — | Optional CSS class on the root element |
 
 ---
@@ -174,6 +177,33 @@ const MY_CURRICULUM: Curriculum = {
 ```
 
 See [CUSTOMIZATION.md](./CUSTOMIZATION.md) for the full guide, including prompting Claude for different use cases.
+
+---
+
+## Users & saved progress
+
+Pass the signed-in learner and persist their progress in your own backend so it follows them across devices.
+
+```tsx
+import { AITutor } from "thepplbot";
+import type { TutorProgress } from "thepplbot";
+
+<AITutor
+  api={{ apiEndpoint: "/api/tutor" }}
+  user={{ id: user.id, name: user.fullName, gameName: user.handle }}
+  initialProgress={savedProgress}            // loaded from your DB
+  onProgressChange={(p) => saveProgress(user.id, p)}  // write it back
+/>
+```
+
+- **`user.id`** keys the learner's progress.
+- **`user.name`** is passed to the tutor so it addresses them by name. Users edit their name in *your* platform's settings; pass the new value in and the widget updates. The widget itself never edits it.
+- **`user.gameName`** is the public display handle shown in the header and Progress view.
+- **`onProgressChange`** makes your backend the source of truth — when provided, the widget stops using `localStorage`. Without it, progress is cached in `localStorage` keyed by `user.id` (or `orgName` if no user), which stays on one device.
+
+> Loading progress asynchronously? Mount the widget after it resolves, or pass `key={user.id}` so it re-seeds when the user (or their data) changes.
+
+`TutorProgress` is `{ counts: Record<string, number>; typingXp: number }` — treat it as an opaque blob you store and hand back.
 
 ---
 

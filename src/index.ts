@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ai-tutor-widget — public API
+// thepplbot — public API
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Main component
@@ -16,4 +16,8 @@ export type {
   Curriculum,
   CurriculumModule,
   ChatMessage,
+  Modality,
+  ChatPosition,
+  TutorUser,
+  TutorProgress,
 } from "./types";

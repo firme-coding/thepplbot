@@ -130,6 +130,42 @@ await act(async () => {
 check("floating: panel opens on tap", fContainer.textContent.includes("Ask your first question below."));
 check("floating: fixed to corner", fContainer.querySelector("div")?.style.position === "fixed");
 
+// 6. User identity + backend-synced progress
+const uContainer = document.createElement("div");
+document.body.appendChild(uContainer);
+const uRoot = createRoot(uContainer);
+const progressUpdates = [];
+await act(async () => {
+  uRoot.render(
+    React.createElement(AITutor, {
+      api: { apiEndpoint: "/api/tutor" },
+      orgName: "Firme Coding",
+      user: { id: "user-123", name: "Maria", gameName: "CodeQueen" },
+      initialProgress: { counts: { about: 2 }, typingXp: 30 },
+      onProgressChange: (p) => progressUpdates.push(p),
+    }),
+  );
+});
+check("gameName shows in header", uContainer.textContent.includes("CodeQueen"));
+check("initialProgress seeds XP (2 q ×10 + 30)", uContainer.textContent.includes("50 XP"));
+await act(async () => {
+  const ta = uContainer.querySelector("textarea");
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+  setter.call(ta, "hello");
+  ta.dispatchEvent(new window.Event("input", { bubbles: true }));
+});
+await act(async () => {
+  uContainer.querySelector('button[aria-label="Send"]').dispatchEvent(
+    new window.MouseEvent("click", { bubbles: true }),
+  );
+  await wait(60);
+});
+check(
+  "onProgressChange fires with updated counts",
+  progressUpdates.length >= 1 && progressUpdates.at(-1).counts.about === 3,
+);
+check("controlled mode did NOT write localStorage", window.localStorage.getItem("ai-tutor:progress:user-123") === null);
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

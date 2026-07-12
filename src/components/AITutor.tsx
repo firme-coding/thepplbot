@@ -287,6 +287,9 @@ export function AITutor({
   onClose,
   defaultModality = "reading",
   position,
+  user,
+  initialProgress,
+  onProgressChange,
 }: AITutorProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const moduleKeys = Object.keys(curriculum);
@@ -300,34 +303,44 @@ export function AITutor({
   const [showModules, setShowModules] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const storageKey = `ai-tutor:progress:${orgName}`;
-  const [counts, setCounts] = useState<Counts>(() => loadCounts(storageKey));
-  const typingKey = `ai-tutor:typingxp:${orgName}`;
-  const [typingXp, setTypingXp] = useState<number>(() => loadNumber(typingKey));
+  // Progress: host-controlled (persisted in your backend) when onProgressChange
+  // is provided, otherwise cached in localStorage keyed by userId (or orgName).
+  const controlled = typeof onProgressChange === "function";
+  const progressId = user?.id ?? orgName;
+  const storageKey = `ai-tutor:progress:${progressId}`;
+  const typingKey = `ai-tutor:typingxp:${progressId}`;
+  const [counts, setCounts] = useState<Counts>(() =>
+    controlled ? initialProgress?.counts ?? {} : loadCounts(storageKey),
+  );
+  const [typingXp, setTypingXp] = useState<number>(() =>
+    controlled ? initialProgress?.typingXp ?? 0 : loadNumber(typingKey),
+  );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const didMountProgress = useRef(false);
 
   useEffect(() => injectStyles(), []);
 
-  // Persist progress
+  // Persist progress — emit to the host, or fall back to localStorage.
   useEffect(() => {
+    if (!didMountProgress.current) {
+      didMountProgress.current = true;
+      return; // don't echo the seeded value back on mount
+    }
+    if (controlled) {
+      onProgressChange?.({ counts, typingXp });
+      return;
+    }
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(counts));
-    } catch {
-      /* storage unavailable — ignore */
-    }
-  }, [counts, storageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
       window.localStorage.setItem(typingKey, String(typingXp));
     } catch {
       /* storage unavailable — ignore */
     }
-  }, [typingXp, typingKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [counts, typingXp]);
 
   // Reset chat when the module changes
   useEffect(() => {
@@ -344,6 +357,7 @@ export function AITutor({
 
   const resolvedSystemPrompt =
     (systemPrompt ?? DEFAULT_SYSTEM(orgName, activeModule?.content ?? "")) +
+    (user?.name ? `\n\nThe learner's name is ${user.name}. Address them warmly by name when it feels natural.` : "") +
     `\n\nPREFERRED EXPLANATION STYLE — ${activeModality.label}: ${activeModality.hint}`;
 
   // ── Gamification derived values ────────────────────────────────────────────
@@ -572,7 +586,7 @@ export function AITutor({
                 {orgName}
               </div>
               <div style={{ fontSize: 12, color: ink2, marginTop: 1 }}>
-                Lv {level} · {xp} XP
+                {user?.gameName ? `${user.gameName} · ` : ""}Lv {level} · {xp} XP
               </div>
             </div>
           </div>
@@ -871,6 +885,13 @@ export function AITutor({
           className="ai-tutor-scroll"
           style={{ flex: 1, overflowY: "auto", padding: "18px 16px 24px", background: groupBg }}
         >
+          {/* Greeting */}
+          {user?.gameName && (
+            <div style={{ textAlign: "center", marginBottom: 8, fontSize: 20, fontWeight: 700, color: ink, letterSpacing: "-0.02em" }}>
+              {user.gameName}
+            </div>
+          )}
+
           {/* Level ring */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
             <LevelRing pct={levelPct} level={level} primary={primaryColor} secondary={secondaryColor} />
