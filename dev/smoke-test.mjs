@@ -34,7 +34,7 @@ globalThis.fetch = async (_url, opts) => {
   const body = JSON.parse(opts.body);
   posted.push(body);
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user")?.content ?? "";
-  const reply = `MOCK[${body.module}] → you asked: "${lastUser}"`;
+  const reply = `**MOCK[${body.module}]** — you asked: "${lastUser}"\n\n- point one\n- point two`;
   return { ok: true, status: 200, json: async () => ({ reply }), text: async () => "" };
 };
 
@@ -86,6 +86,8 @@ await act(async () => {
 
 check("user message appears", container.textContent.includes("What do you build?"));
 check("mock reply rendered from fetch", container.textContent.includes('MOCK[') && container.textContent.includes('you asked: "What do you build?"'));
+check("markdown renders (bold, no literal **)", !container.textContent.includes("**") && !!container.querySelector("strong"));
+check("markdown renders list items", container.querySelectorAll("li").length >= 2);
 check("fetch received module + messages", posted.length === 1 && posted[0].module && Array.isArray(posted[0].messages));
 check("XP incremented to 10 after 1 question", container.textContent.includes("10 XP"));
 

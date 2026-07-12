@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { ChatMessage, AITutorProps, Modality } from "../types";
 import { DEMO_CURRICULUM } from "../curriculum";
 import { sendMessage } from "../lib/claude";
+import { Markdown } from "../lib/markdown";
+import { speak, stopSpeaking, speechSupported } from "../lib/speech";
 
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
@@ -169,6 +171,13 @@ function Glyph({
       return (
         <svg {...p}>
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      );
+    case "speaker":
+      return (
+        <svg {...p}>
+          <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
         </svg>
       );
     case "list":
@@ -346,7 +355,11 @@ export function AITutor({
   useEffect(() => {
     setMessages([]);
     setError(null);
+    stopSpeaking();
   }, [selectedKey]);
+
+  // Stop any speech when the widget unmounts
+  useEffect(() => () => stopSpeaking(), []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -395,12 +408,13 @@ export function AITutor({
         ...prev,
         { role: "assistant", content: reply, id: generateId() },
       ]);
+      if (modality === "audio") speak(reply); // read it aloud in audio mode
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setIsLoading(false);
     }
-  }, [api, input, isLoading, messages, model, resolvedSystemPrompt, selectedKey]);
+  }, [api, input, isLoading, messages, model, modality, resolvedSystemPrompt, selectedKey]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -725,7 +739,8 @@ export function AITutor({
                   key={msg.id}
                   style={{
                     display: "flex",
-                    justifyContent: isUser ? "flex-end" : "flex-start",
+                    flexDirection: "column",
+                    alignItems: isUser ? "flex-end" : "flex-start",
                     padding: "0 14px",
                     marginBottom: 8,
                     animation: "ai-tutor-pop .28s cubic-bezier(.22,1,.36,1)",
@@ -733,11 +748,11 @@ export function AITutor({
                 >
                   <div
                     style={{
-                      maxWidth: "78%",
+                      maxWidth: "82%",
                       padding: "9px 14px",
                       fontSize: 15.5,
                       lineHeight: 1.42,
-                      whiteSpace: "pre-wrap",
+                      whiteSpace: isUser ? "pre-wrap" : "normal",
                       wordBreak: "break-word",
                       color: isUser ? "#fff" : ink,
                       background: isUser ? primaryColor : "#E9E9EB",
@@ -746,8 +761,33 @@ export function AITutor({
                       borderBottomLeftRadius: isUser ? 20 : 6,
                     }}
                   >
-                    {msg.content}
+                    {isUser ? msg.content : <Markdown text={msg.content} accent={primaryColor} />}
                   </div>
+                  {!isUser && speechSupported() && (
+                    <button
+                      className="ai-tutor-tap"
+                      onClick={() => speak(msg.content)}
+                      aria-label="Read aloud"
+                      title="Read aloud"
+                      style={{
+                        marginTop: 3,
+                        marginLeft: 4,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        color: ink2,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: 11,
+                        fontFamily: FONT,
+                        padding: "2px 4px",
+                      }}
+                    >
+                      <Glyph k="speaker" size={13} color={ink2} stroke={2} />
+                      Listen
+                    </button>
+                  )}
                 </div>
               );
             })}
