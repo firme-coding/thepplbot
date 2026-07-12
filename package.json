@@ -1,8 +1,17 @@
 {
   "name": "thepplbot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Embeddable AI tutor widget — iOS-style, customizable colors, logo, and curriculum. Powered by Claude.",
-  "keywords": ["ai", "tutor", "assistant", "widget", "chat", "claude", "anthropic", "react"],
+  "keywords": [
+    "ai",
+    "tutor",
+    "assistant",
+    "widget",
+    "chat",
+    "claude",
+    "anthropic",
+    "react"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -20,7 +29,11 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md", "CUSTOMIZATION.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "CUSTOMIZATION.md"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
