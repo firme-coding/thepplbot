@@ -1,0 +1,99 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Tutor — TypeScript Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A single curriculum module */
+export interface CurriculumModule {
+  /** Display name shown in the module selector dropdown */
+  label: string;
+  /** The curriculum content the AI uses as context */
+  content: string;
+}
+
+/** Full curriculum passed to the tutor */
+export type Curriculum = Record<string, CurriculumModule>;
+
+/**
+ * How the learner wants examples presented. Selecting one nudges the tutor to
+ * tailor its explanations to that learning style.
+ */
+export type Modality = "reading" | "visual" | "audio" | "images" | "hands-on";
+
+/**
+ * Corner to dock the floating chat launcher in. When set, the widget renders as
+ * a fixed chat-bubble button that opens the panel. When omitted, it renders
+ * inline, filling its container.
+ */
+export type ChatPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left";
+
+/** A single chat message */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  id: string;
+}
+
+/** Config for calling Claude directly or via your own proxy */
+export type ApiConfig =
+  | {
+      /**
+       * Your Anthropic API key.
+       * ⚠️  Only use this in development or if your site is gated (not public).
+       * For production public sites, use `apiEndpoint` with a server-side proxy.
+       */
+      apiKey: string;
+      apiEndpoint?: never;
+    }
+  | {
+      apiKey?: never;
+      /**
+       * URL of your own API endpoint that proxies calls to Claude.
+       * POST body: { module: string; messages: { role: string; content: string }[] }
+       * Expected response: { reply: string }
+       */
+      apiEndpoint: string;
+    };
+
+/** Branding / theming props */
+export interface BrandConfig {
+  /** Your organization name. Defaults to "AI Tutor" */
+  orgName?: string;
+  /** URL to your logo image. Falls back to text-only header if not provided */
+  logoUrl?: string;
+  /** Primary brand color (hex). Defaults to iOS system blue #007AFF */
+  primaryColor?: string;
+  /** Secondary accent (hex), used for gradients. Defaults to iOS indigo #5856D6 */
+  secondaryColor?: string;
+}
+
+/** All props for the <AITutor /> component */
+export interface AITutorProps extends BrandConfig {
+  /** API config — either an API key or your own proxy endpoint */
+  api: ApiConfig;
+  /**
+   * Curriculum modules. Defaults to the bundled demo curriculum.
+   * See CUSTOMIZATION.md for how to add your own.
+   */
+  curriculum?: Curriculum;
+  /** Claude model to use. Defaults to claude-haiku-4-5-20251001 for speed */
+  model?: string;
+  /** System prompt override. See CUSTOMIZATION.md for guidance */
+  systemPrompt?: string;
+  /** Chat input placeholder text */
+  placeholder?: string;
+  /** Optional CSS class added to the root element */
+  className?: string;
+  /**
+   * Called when the user taps the close (✕) button. If omitted (and not in
+   * floating mode), the close button is hidden.
+   */
+  onClose?: () => void;
+  /** Which example modality is selected on first render. Defaults to "reading" */
+  defaultModality?: Modality;
+  /**
+   * Dock the widget as a floating chat launcher in a viewport corner
+   * ("bottom-right" | "bottom-left" | "top-right" | "top-left"). Omit to render
+   * inline, filling the parent container.
+   */
+  position?: ChatPosition;
+}

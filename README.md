@@ -1,0 +1,209 @@
+# thepplbot
+
+An embeddable, iOS-style AI tutor widget for any React site. Swap in your colors, logo, and content, drop it into a page, and you get a grounded Socratic tutor with typing practice and built-in gamification.
+
+The bundled demo content is a live tour of [Firme Coding](https://firmecoding.org) — a team of developers, including formerly incarcerated engineers, building production software for businesses and nonprofits.
+
+---
+
+## Features
+
+- **Native iOS feel** — frosted nav/input bars, segmented controls, system blue, rounded cards, spring motion.
+- **Three views** in one segmented control:
+  - **Chat** — Socratic tutor grounded in your curriculum.
+  - **Typing** — a typing drill built from the module's own key terms, scored on WPM + accuracy.
+  - **Progress** — level ring, XP, module mastery, and badges.
+- **Learning modalities** — reading · visual · audio · images · hands-on. Picking one tailors how the tutor explains.
+- **Gamification** — earn XP from questions and typing, level up, master modules, unlock badges. Progress persists in `localStorage`.
+- **Expand & close** — resize the widget or dismiss it via the `onClose` prop.
+- **Bring your own model & curriculum** — any Claude model, any content.
+
+---
+
+## Install
+
+```bash
+npm install thepplbot
+# or
+yarn add thepplbot
+```
+
+React 18+ is required as a peer dependency.
+
+---
+
+## Quick start
+
+```tsx
+import { AITutor } from "thepplbot";
+
+export default function MyPage() {
+  return (
+    <div style={{ height: "640px" }}>
+      <AITutor
+        api={{ apiKey: import.meta.env.VITE_ANTHROPIC_KEY }}
+        orgName="My Org"
+        primaryColor="#007AFF"
+        secondaryColor="#5856D6"
+      />
+    </div>
+  );
+}
+```
+
+The widget ships with a demo curriculum loaded by default. Swap in your own — see [CUSTOMIZATION.md](./CUSTOMIZATION.md).
+
+> **No bundler?** Once published, it's served on a CDN: `https://unpkg.com/thepplbot`.
+
+---
+
+## Floating launcher
+
+Pass `position` to dock it as a chat bubble in a viewport corner. It opens on tap and collapses on ✕ — no layout wrapper needed.
+
+```tsx
+<AITutor
+  api={{ apiEndpoint: "/api/tutor" }}
+  orgName="My Org"
+  position="bottom-right"   // or bottom-left | top-right | top-left
+/>
+```
+
+Without `position`, the widget renders inline and fills its parent container (give the parent a height).
+
+---
+
+## Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `api` | `ApiConfig` | required | API key or proxy endpoint (see below) |
+| `orgName` | `string` | `"AI Tutor"` | Organization name in the header |
+| `logoUrl` | `string` | — | Logo shown in the header instead of the letter avatar |
+| `primaryColor` | `string` | `"#007AFF"` | Accent color — user bubbles, send button, active states |
+| `secondaryColor` | `string` | `"#5856D6"` | Gradient partner — level ring, avatar, badges |
+| `curriculum` | `Curriculum` | demo curriculum | Your custom curriculum — see CUSTOMIZATION.md |
+| `model` | `string` | `"claude-haiku-4-5-20251001"` | Claude model to use |
+| `systemPrompt` | `string` | Built-in Socratic prompt | Override the AI's behavior entirely |
+| `placeholder` | `string` | `"Ask a question…"` | Chat input placeholder |
+| `defaultModality` | `Modality` | `"reading"` | Starting example style: `reading \| visual \| audio \| images \| hands-on` |
+| `position` | `ChatPosition` | — | Dock as a floating launcher: `bottom-right \| bottom-left \| top-right \| top-left`. Omit for inline |
+| `onClose` | `() => void` | — | Called on the close (✕) button. If omitted (and not floating), the button is hidden |
+| `className` | `string` | — | Optional CSS class on the root element |
+
+---
+
+## API config
+
+**Option 1 — API key (development / private apps only)**
+
+```tsx
+api={{ apiKey: "sk-ant-..." }}
+```
+
+⚠️ Never expose your API key on a public site. Use the proxy option in production.
+
+**Option 2 — Proxy endpoint (production)**
+
+```tsx
+api={{ apiEndpoint: "/api/tutor" }}
+```
+
+Your endpoint receives:
+```json
+{
+  "module": "websites",
+  "systemPrompt": "...",
+  "messages": [{ "role": "user", "content": "..." }]
+}
+```
+
+And must return:
+```json
+{ "reply": "..." }
+```
+
+Example Next.js API route:
+
+```ts
+// app/api/tutor/route.ts
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+export async function POST(req: Request) {
+  const { systemPrompt, messages } = await req.json();
+
+  const res = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages,
+  });
+
+  const reply = res.content.find((b) => b.type === "text")?.text ?? "";
+  return Response.json({ reply });
+}
+```
+
+---
+
+## Use your own curriculum
+
+Each module's content grounds the tutor **and** seeds the typing drill (it pulls key terms and overview sentences straight from the text).
+
+```tsx
+import { AITutor } from "thepplbot";
+import type { Curriculum } from "thepplbot";
+
+const MY_CURRICULUM: Curriculum = {
+  intro: {
+    label: "Introduction",
+    content: `
+      Overview: what this module covers.
+      Key points:
+      - the things the AI should stay grounded in
+      - vocabulary worth drilling
+      Common questions: what people usually ask, and how to answer.
+    `,
+  },
+  // ... add more modules
+};
+
+<AITutor api={{ apiEndpoint: "/api/tutor" }} curriculum={MY_CURRICULUM} />
+```
+
+See [CUSTOMIZATION.md](./CUSTOMIZATION.md) for the full guide, including prompting Claude for different use cases.
+
+---
+
+## Development
+
+```bash
+npm run dev        # live preview at localhost:5173 (mock replies, no key needed)
+npm run build      # produce dist/ (ESM + UMD + type declarations)
+npm run typecheck  # tsc --noEmit
+npm test           # build, then a headless smoke test driven by mock data
+```
+
+`npm test` renders the compiled package in jsdom, stubs `fetch` with mock replies, and checks the chat, XP/gamification, and typing views all work — no API key required.
+
+---
+
+## Donate
+
+This project is maintained by [Firme Coding](https://firmecoding.org). Client work and donations fund a free training program that brings new developers — many of them formerly incarcerated — into tech careers.
+
+If the widget is useful to you, consider giving back:
+
+**→ [Donate to Firme Coding](https://firmecoding.org/donate)**
+
+Every dollar goes toward laptops, instruction, and mentorship for the next cohort. Need a website, ongoing maintenance, or a custom platform built? [Get in touch](https://firmecoding.org) — hiring the team supports the mission too.
+
+---
+
+## License
+
+MIT — use it, fork it, build on it. If it helps your community, we'd love to hear about it.
+
+Built with ♥ by [Firme Coding](https://firmecoding.org).
