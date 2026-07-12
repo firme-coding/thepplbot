@@ -23,17 +23,35 @@ function facts(content: string): string[] {
     .map((l) => l.trim())
     .filter((l) => l.startsWith("-"))
     .map((l) => l.replace(/^-\s*/, "").replace(/\s+/g, " ").trim());
-  const overview = (content.match(/Overview:\s*([\s\S]*?)(?:\n\s*\n|$)/i)?.[1] ?? "")
+  // Overview text stops at a blank line, the first bullet, or a section header.
+  const overview = (content.match(/Overview:\s*([\s\S]*?)(?:\n\s*\n|\n\s*-|$)/i)?.[1] ?? "")
     .replace(/\s+/g, " ")
     .trim();
   const sentences = overview
     .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
+    .map((s) => s.replace(/^-\s*/, "").trim())
     .filter((s) => s.length > 20);
-  return [...sentences, ...bullets].filter((f) => f.length >= 12);
+  const seen = new Set<string>();
+  return [...sentences, ...bullets]
+    .filter((f) => f.length >= 12)
+    .filter((f) => (seen.has(f) ? false : (seen.add(f), true)));
 }
 
 const words = (s: string) => s.toLowerCase().match(/[a-z]{4,}/g) ?? [];
+
+/** Which modality the widget asked for (encoded in the system prompt). */
+function modalityOf(systemPrompt: string): string {
+  const m = systemPrompt.match(/PREFERRED EXPLANATION STYLE — ([\w-]+)/i);
+  return (m?.[1] ?? "reading").toLowerCase();
+}
+
+// Demo-only illustration. Real photos need an image API (e.g. Unsplash); this
+// keyless placeholder just proves the widget renders images inline.
+function illustration(kind: "photo" | "diagram", caption: string): string {
+  const q = encodeURIComponent(caption.split(/\s+/).slice(0, 6).join(" ") || "illustration");
+  const color = kind === "diagram" ? "0A84FF" : "6C5CE7";
+  return `![${kind}](https://placehold.co/600x340/${color}/ffffff/png?text=${q})`;
+}
 
 /** Rank facts by keyword overlap with the question (best first). */
 function rankFacts(pool: string[], question: string): { fact: string; score: number }[] {
@@ -74,7 +92,21 @@ function buildReply(systemPrompt: string, question: string, userTurns: number): 
   const pick = <T,>(arr: T[]) => arr[Math.max(0, userTurns - 1) % arr.length];
   const lead = hit ? pick(MATCH_LEADS) : pick(NOMATCH_LEADS);
   const body = unique.map((f) => `- ${f}`).join("\n");
-  return `${lead}\n\n${body}\n\n${pick(FOLLOWUPS)}`;
+  const followup = pick(FOLLOWUPS);
+
+  // Make the modality visibly change the reply.
+  const modality = modalityOf(systemPrompt);
+  const caption = unique[0] ?? question;
+  if (modality === "images") {
+    return `${lead}\n\n${illustration("photo", caption)}\n\n${body}\n\n${followup}`;
+  }
+  if (modality === "visual") {
+    return `${illustration("diagram", caption)}\n\n**Picture it:**\n\n${body}\n\n${followup}`;
+  }
+  if (modality === "hands-on") {
+    return `**Try this:** in your own words, explain one of these to a friend —\n\n${body}\n\nThen tell me which was hardest to put into words.`;
+  }
+  return `${lead}\n\n${body}\n\n${followup}`;
 }
 
 export function mockTutorApi(): Plugin {
