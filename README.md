@@ -1,5 +1,7 @@
 # thepplbot
 
+[![CI](https://github.com/firme-coding/thepplbot/actions/workflows/ci.yml/badge.svg)](https://github.com/firme-coding/thepplbot/actions/workflows/ci.yml)
+
 An embeddable, iOS-style AI tutor widget for any React site. Swap in your colors, logo, and content, drop it into a page, and you get a grounded Socratic tutor with typing practice and built-in gamification.
 
 The bundled demo content is a live tour of [Firme Coding](https://firmecoding.org) — a team of developers, including formerly incarcerated engineers, building production software for businesses and nonprofits.
