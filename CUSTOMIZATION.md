@@ -80,6 +80,71 @@ export const MY_CURRICULUM: Curriculum = {
 - Write it like you'd write notes for someone covering for you — assume they know nothing about your topic.
 - The AI reads it on every message turn. Keep each module under ~8,000 words or token limits may apply.
 
+**Adding a module** is just adding another key to the object — no cap on how many:
+
+```ts
+const MY_CURRICULUM: Curriculum = {
+  week_01: { label: "Week 1: Variables", content: `...` },
+  week_02: { label: "Week 2: Loops",     content: `...` },
+  week_03: { label: "Week 3: Functions", content: `...` },  // ← add as many as you want
+};
+```
+
+The learner switches between them with the **Modules** button. Mastery, chat, and
+the typing drill all track the *active* module.
+
+---
+
+## Multiple courses
+
+One `<AITutor>` holds one curriculum (a set of modules). For separate courses,
+render separate instances — or swap the `curriculum` prop and force a clean
+remount with a changing `key`:
+
+```tsx
+import { useState } from "react";
+import { AITutor } from "thepplbot";
+import { FRENCH_QUARTER_CURRICULUM } from "./curricula/french-quarter";
+import { MATH_CURRICULUM } from "./curricula/math";
+
+const COURSES = {
+  history: { label: "New Orleans History", curriculum: FRENCH_QUARTER_CURRICULUM, color: "#8B5CF6" },
+  math:    { label: "Intro to Math",       curriculum: MATH_CURRICULUM,          color: "#007AFF" },
+};
+
+function Tutor() {
+  const [id, setId] = useState<keyof typeof COURSES>("history");
+  const course = COURSES[id];
+  return (
+    <>
+      <select value={id} onChange={(e) => setId(e.target.value as keyof typeof COURSES)}>
+        {Object.entries(COURSES).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
+      </select>
+      <div style={{ height: 640, maxWidth: 440 }}>
+        <AITutor
+          key={id}                          // ← remounts fresh on course change
+          api={{ apiEndpoint: "/api/tutor" }}
+          orgName={course.label}
+          curriculum={course.curriculum}
+          primaryColor={course.color}
+        />
+      </div>
+    </>
+  );
+}
+```
+
+**Why the `key`:** the widget picks its starting module from the first key on
+mount. Without a changing `key`, switching courses leaves it on the old course's
+module (blank until the learner reopens the Modules sheet). `key={id}` tells React
+to start clean.
+
+- **Separate pages** (`/courses/history`, `/courses/math`) each mount their own
+  `<AITutor>` — no `key` needed.
+- **Per-course progress:** progress keys off `user.id` (or `orgName`). To keep each
+  course's XP separate, give each a distinct `orgName`, or store progress by
+  `courseId + userId` on your backend and pass the right `initialProgress`.
+
 ---
 
 ## System prompt
