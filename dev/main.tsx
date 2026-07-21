@@ -1,8 +1,9 @@
 // Dev-only harness / live playground for <AITutor />.
 // Not part of the published package (the package entry is src/index.ts).
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AITutor, DEMO_CURRICULUM } from "../src/index";
+import type { Curriculum, TranscriptTurn, TutorProgress } from "../src/index";
 import { FRENCH_QUARTER_CURRICULUM } from "../src/curriculum-french-quarter";
 
 const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined;
@@ -24,6 +25,30 @@ const COURSES = {
 } as const;
 type CourseId = keyof typeof COURSES;
 
+// ── Fake "database" for the DB-mode demo ────────────────────────────────────
+// Stands in for Supabase/Prisma/your REST API. Progress is persisted in
+// localStorage; curriculum is served from the in-memory COURSES map. Every read
+// is delayed so the widget's loading state is actually visible.
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const progressKey = (userId: string | undefined) => `pplbot.demo.progress.${userId ?? "anon"}`;
+
+const fakeDb = {
+  async fetchCurriculum(courseId: CourseId): Promise<Curriculum> {
+    await sleep(900); // simulate a network round-trip
+    return COURSES[courseId].curriculum;
+  },
+  async fetchProgress(userId: string | undefined): Promise<TutorProgress | null> {
+    await sleep(500);
+    const raw = localStorage.getItem(progressKey(userId));
+    return raw ? (JSON.parse(raw) as TutorProgress) : null;
+  },
+  saveProgress(userId: string | undefined, p: TutorProgress) {
+    localStorage.setItem(progressKey(userId), JSON.stringify(p));
+  },
+};
+
+const DEMO_USER = { id: "demo-user-1", name: "Demo Learner", gameName: "demo" };
+
 const PROPS: { name: string; req: boolean; type: string; def: string; desc: string }[] = [
   { name: "api", req: true, type: "{ apiKey } | { apiEndpoint }", def: "—", desc: "How to reach Claude. Exactly one." },
   { name: "curriculum", req: false, type: "Curriculum", def: "demo", desc: "Your lessons (object of modules)." },
@@ -40,6 +65,9 @@ const PROPS: { name: string; req: boolean; type: string; def: string; desc: stri
   { name: "user", req: false, type: "TutorUser", def: "—", desc: "Learner { id, name, gameName }." },
   { name: "initialProgress", req: false, type: "TutorProgress", def: "—", desc: "Restore saved XP/progress." },
   { name: "onProgressChange", req: false, type: "(p) => void", def: "—", desc: "Save progress when it changes." },
+  { name: "loadCurriculum", req: false, type: "() => Promise<Curriculum>", def: "—", desc: "Async-load modules from your DB." },
+  { name: "loadProgress", req: false, type: "(userId?) => Promise<TutorProgress | null>", def: "—", desc: "Async-load saved progress from your DB." },
+  { name: "onTranscript", req: false, type: "(t: TranscriptTurn) => void", def: "—", desc: "Persist each Q&A turn to your DB." },
   { name: "className", req: false, type: "string", def: "—", desc: "CSS class on the root element." },
 ];
 
@@ -86,6 +114,20 @@ const MY_CURRICULUM: Curriculum = {
   onProgressChange={(p) => saveProgress(u.id, p)}
 />`,
   },
+  {
+    title: "Plug in your database",
+    code: `// Load curriculum + progress from your DB; save progress + transcripts back.
+// Wrap loaders in useCallback so their identity is stable. See
+// CUSTOMIZATION.md → Connecting your database.
+<AITutor
+  api={{ apiEndpoint: "/api/tutor" }}
+  user={{ id: u.id }}
+  loadCurriculum={loadCurriculum}          // () => Promise<Curriculum>
+  loadProgress={loadProgress}              // (userId?) => Promise<TutorProgress | null>
+  onProgressChange={(p) => saveProgress(u.id, p)}
+  onTranscript={(t) => saveTranscript(t)}  // fire-and-forget per Q&A turn
+/>`,
+  },
 ];
 
 function Code({ code }: { code: string }) {
@@ -126,6 +168,23 @@ function Card({ children }: { children: React.ReactNode }) {
 function DevApp() {
   const [courseId, setCourseId] = useState<CourseId>("firme");
   const course = COURSES[courseId];
+
+  // ── DB-mode demo: drive the widget from the fake database above ───────────
+  const [dbMode, setDbMode] = useState(false);
+  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
+  const [savedProgress, setSavedProgress] = useState<TutorProgress | null>(null);
+
+  // Loaders are wrapped in useCallback so their identity is stable — a new
+  // function each render would re-trigger the fetch on every render.
+  const loadCurriculum = useCallback(() => fakeDb.fetchCurriculum(courseId), [courseId]);
+  const loadProgress = useCallback((userId: string | undefined) => fakeDb.fetchProgress(userId), []);
+  const onProgressChange = useCallback((p: TutorProgress) => {
+    fakeDb.saveProgress(DEMO_USER.id, p);
+    setSavedProgress(p);
+  }, []);
+  const onTranscript = useCallback((t: TranscriptTurn) => {
+    setTranscript((prev) => [t, ...prev].slice(0, 8)); // keep the last 8 turns
+  }, []);
 
   return (
     <div
@@ -177,6 +236,73 @@ function DevApp() {
             Switching courses remounts the widget with that curriculum (via a changing{" "}
             <code>key</code>).
           </p>
+        </Card>
+
+        {/* DB-mode demo */}
+        <Card>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <input type="checkbox" checked={dbMode} onChange={(e) => setDbMode(e.target.checked)} />
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Database mode</span>
+          </label>
+          <p style={{ color: INK2, fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+            Wires <code>loadCurriculum</code>, <code>loadProgress</code>,{" "}
+            <code>onProgressChange</code>, and <code>onTranscript</code> to a fake localStorage
+            "database" (curriculum load is delayed ~1s so you can see the loading state). Progress
+            persists across reloads; each Q&amp;A turn is captured below.
+          </p>
+
+          {dbMode && (
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 13 }}>
+                <strong>Saved progress:</strong>{" "}
+                {savedProgress ? (
+                  <code style={{ fontFamily: MONO, fontSize: 12 }}>
+                    {savedProgress.typingXp} XP · {Object.keys(savedProgress.counts).length} module(s)
+                  </code>
+                ) : (
+                  <span style={{ color: INK2 }}>none yet — ask a question or run the typing drill</span>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Captured transcript ({transcript.length})
+                </div>
+                {transcript.length === 0 ? (
+                  <p style={{ color: INK2, fontSize: 13, margin: 0 }}>
+                    Ask the tutor something — each completed turn lands here via{" "}
+                    <code>onTranscript</code>.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {transcript.map((t, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          fontSize: 12.5,
+                          lineHeight: 1.5,
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          background: "#F2F2F7",
+                        }}
+                      >
+                        <div style={{ color: INK2, fontFamily: MONO, fontSize: 11 }}>
+                          {t.module} · {t.modality}
+                        </div>
+                        <div style={{ marginTop: 3 }}>
+                          <strong>Q:</strong> {t.question}
+                        </div>
+                        <div style={{ marginTop: 2, color: INK2 }}>
+                          <strong style={{ color: INK }}>A:</strong>{" "}
+                          {t.reply.length > 160 ? `${t.reply.slice(0, 160)}…` : t.reply}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Props reference */}
@@ -233,12 +359,23 @@ function DevApp() {
 
       {/* The live widget */}
       <AITutor
-        key={courseId}
+        key={`${courseId}-${dbMode ? "db" : "static"}`}
         api={api}
         orgName={course.label}
-        curriculum={course.curriculum}
         primaryColor={course.color}
         position="bottom-right"
+        // Static mode: pass the curriculum directly.
+        curriculum={course.curriculum}
+        // DB mode: load everything through the fake database and save back.
+        {...(dbMode
+          ? {
+              user: DEMO_USER,
+              loadCurriculum,
+              loadProgress,
+              onProgressChange,
+              onTranscript,
+            }
+          : {})}
       />
     </div>
   );

@@ -55,6 +55,23 @@ export interface TutorProgress {
   typingXp: number;
 }
 
+/**
+ * A completed Q&A turn, handed to `onTranscript` so the host can persist it to
+ * their database (analytics, review, moderation).
+ */
+export interface TranscriptTurn {
+  /** Module key the question was asked in. */
+  module: string;
+  /** The learner's question. */
+  question: string;
+  /** The tutor's reply. */
+  reply: string;
+  /** Explanation modality active for this turn. */
+  modality: Modality;
+  /** The learner's id, if one was supplied via `user`. */
+  userId?: string;
+}
+
 /** Config for calling Claude directly or via your own proxy */
 export type ApiConfig =
   | {
@@ -136,4 +153,28 @@ export interface AITutorProps extends BrandConfig {
    * stops writing to localStorage and treats your store as the source of truth.
    */
   onProgressChange?: (progress: TutorProgress) => void;
+  /**
+   * Async loader for curriculum from your own backend/DB. When provided, the
+   * widget fetches modules on mount (showing a loading state) instead of using
+   * the static `curriculum` prop. If it rejects, the widget falls back to
+   * `curriculum` (or the bundled demo).
+   *
+   * Wrap it in `useCallback` so its identity is stable — a new function every
+   * render re-triggers the fetch.
+   */
+  loadCurriculum?: () => Promise<Curriculum>;
+  /**
+   * Async loader for saved progress from your backend/DB, called with the
+   * current `user.id` on mount and whenever that id changes. Resolve `null` (or
+   * undefined) when there's nothing saved. When provided, it seeds the widget in
+   * place of `initialProgress`, and the seeded value is NOT echoed back to
+   * `onProgressChange`. Wrap it in `useCallback` for a stable identity.
+   */
+  loadProgress?: (userId: string | undefined) => Promise<TutorProgress | null | undefined>;
+  /**
+   * Called after each completed Q&A turn so you can persist the transcript to
+   * your DB. Fire-and-forget — the widget doesn't await it, and throwing won't
+   * break the chat.
+   */
+  onTranscript?: (turn: TranscriptTurn) => void;
 }

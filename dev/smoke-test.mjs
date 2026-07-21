@@ -168,6 +168,58 @@ check(
 );
 check("controlled mode did NOT write localStorage", window.localStorage.getItem("ai-tutor:progress:user-123") === null);
 
+// 7. DB-backed sources: loadCurriculum / loadProgress / onTranscript
+const dbContainer = document.createElement("div");
+document.body.appendChild(dbContainer);
+const dbRoot = createRoot(dbContainer);
+let resolveCurriculum;
+const curriculumPromise = new Promise((r) => (resolveCurriculum = r));
+const transcripts = [];
+const dbProgressUpdates = [];
+await act(async () => {
+  dbRoot.render(
+    React.createElement(AITutor, {
+      api: { apiEndpoint: "/api/tutor" },
+      orgName: "Firme Coding",
+      user: { id: "u-db" },
+      loadCurriculum: () => curriculumPromise,
+      loadProgress: async () => ({ counts: { welcome: 4 }, typingXp: 0 }),
+      onProgressChange: (p) => dbProgressUpdates.push(p),
+      onTranscript: (t) => transcripts.push(t),
+    }),
+  );
+});
+check("loadCurriculum: shows loading state first", dbContainer.textContent.includes("Loading curriculum…"));
+await act(async () => {
+  resolveCurriculum({ welcome: { label: "Welcome Module", content: "Overview: Learn the basics here." } });
+  await wait(20);
+});
+check("loadCurriculum: renders loaded module", dbContainer.textContent.includes("Welcome Module"));
+check("loadCurriculum: loading state gone", !dbContainer.textContent.includes("Loading curriculum…"));
+check("loadProgress: seeds XP from DB (4 q ×10)", dbContainer.textContent.includes("40 XP"));
+check("loadProgress: seeded value NOT echoed to onProgressChange", dbProgressUpdates.length === 0);
+await act(async () => {
+  const ta = dbContainer.querySelector("textarea");
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+  setter.call(ta, "why is this useful?");
+  ta.dispatchEvent(new window.Event("input", { bubbles: true }));
+});
+await act(async () => {
+  dbContainer.querySelector('button[aria-label="Send"]').dispatchEvent(
+    new window.MouseEvent("click", { bubbles: true }),
+  );
+  await wait(60);
+});
+check(
+  "onTranscript: fires with the completed turn",
+  transcripts.length === 1 &&
+    transcripts[0].module === "welcome" &&
+    transcripts[0].question === "why is this useful?" &&
+    transcripts[0].reply.includes("MOCK[welcome]") &&
+    transcripts[0].userId === "u-db",
+);
+check("onTranscript turn: after a real question, progress DOES persist", dbProgressUpdates.length === 1);
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

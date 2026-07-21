@@ -46,6 +46,7 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "npm run build && node dev/smoke-test.mjs",
+    "yalc:push": "npm run build && yalc push",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {

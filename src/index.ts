@@ -20,4 +20,5 @@ export type {
   ChatPosition,
   TutorUser,
   TutorProgress,
+  TranscriptTurn,
 } from "./types";

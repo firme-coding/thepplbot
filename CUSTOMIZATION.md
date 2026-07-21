@@ -147,6 +147,78 @@ to start clean.
 
 ---
 
+## Connecting your database
+
+The `curriculum` and `initialProgress` props are fine when your data is static or
+already loaded. To drive the widget from your own database, pass async functions
+instead — the widget calls them and handles loading/error states for you. It never
+talks to your database directly; you bring your own client (Supabase, Prisma, a
+REST call, whatever).
+
+Three hooks, all optional and independent:
+
+| Prop | Direction | When it runs |
+| --- | --- | --- |
+| `loadCurriculum` | DB → widget | On mount. Fetches the modules. |
+| `loadProgress` | DB → widget | On mount, and whenever `user.id` changes. |
+| `onProgressChange` / `onTranscript` | widget → DB | After each question / typing drill. |
+
+```tsx
+import { useCallback } from "react";
+import { AITutor, type Curriculum, type TutorProgress, type TranscriptTurn } from "thepplbot";
+import { supabase } from "./supabase";
+
+function Tutor({ userId }: { userId: string }) {
+  // Wrap loaders in useCallback so their identity is stable — a new function
+  // every render re-triggers the fetch.
+  const loadCurriculum = useCallback(async (): Promise<Curriculum> => {
+    const { data } = await supabase.from("modules").select("key,label,content").order("position");
+    return Object.fromEntries((data ?? []).map((m) => [m.key, { label: m.label, content: m.content }]));
+  }, []);
+
+  const loadProgress = useCallback(async (id: string | undefined): Promise<TutorProgress | null> => {
+    if (!id) return null;
+    const { data } = await supabase.from("progress").select("counts,typing_xp").eq("user_id", id).single();
+    return data ? { counts: data.counts, typingXp: data.typing_xp } : null;
+  }, []);
+
+  const saveProgress = useCallback((p: TutorProgress) => {
+    void supabase.from("progress").upsert({ user_id: userId, counts: p.counts, typing_xp: p.typingXp });
+  }, [userId]);
+
+  const saveTranscript = useCallback((t: TranscriptTurn) => {
+    void supabase.from("transcripts").insert({
+      user_id: t.userId, module: t.module, question: t.question, reply: t.reply, modality: t.modality,
+    });
+  }, []);
+
+  return (
+    <AITutor
+      api={{ apiEndpoint: "/api/tutor" }}
+      user={{ id: userId }}
+      loadCurriculum={loadCurriculum}
+      loadProgress={loadProgress}
+      onProgressChange={saveProgress}
+      onTranscript={saveTranscript}
+    />
+  );
+}
+```
+
+**Behavior worth knowing:**
+- While `loadCurriculum` is fetching, the widget shows a loading state instead of
+  the static fallback. If it rejects, it falls back to the `curriculum` prop (or the
+  bundled demo) and surfaces the error.
+- A value from `loadProgress` seeds the widget but is **not** echoed back to
+  `onProgressChange` — only real learner activity triggers a save, so you won't get
+  a write-back loop on load.
+- `onTranscript` is fire-and-forget. The widget doesn't await it, and if it throws
+  the chat keeps working. Do your own batching/retries if you need them.
+- Loading async? You don't need `initialProgress` when you pass `loadProgress`. If
+  you pass both, `loadProgress` wins once it resolves.
+
+---
+
 ## System prompt
 
 The system prompt controls *how* Claude behaves as a tutor. The default uses a Socratic approach — it asks questions, gives hints, and doesn't hand over answers.

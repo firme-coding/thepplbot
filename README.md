@@ -108,6 +108,9 @@ Only `api` is required. Everything else is optional.
 | `user` | no | `TutorUser` | — | Signed-in learner: `{ id, name, gameName }` — see below |
 | `initialProgress` | no | `TutorProgress` | — | Progress to restore on mount (from your backend) |
 | `onProgressChange` | no | `(p: TutorProgress) => void` | — | Fires when progress changes so you can persist it |
+| `loadCurriculum` | no | `() => Promise<Curriculum>` | — | Async-load modules from your DB — see CUSTOMIZATION.md → Connecting your database |
+| `loadProgress` | no | `(userId?) => Promise<TutorProgress \| null>` | — | Async-load saved progress from your DB, keyed by `user.id` |
+| `onTranscript` | no | `(t: TranscriptTurn) => void` | — | Fires after each Q&A turn so you can persist the transcript |
 | `className` | no | `string` | — | Optional CSS class on the root element |
 
 ---

@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import type { ChatMessage, AITutorProps, Modality } from "../types";
+import type { ChatMessage, AITutorProps, Modality, Curriculum } from "../types";
 import { DEMO_CURRICULUM } from "../curriculum";
+
+// Stable empty reference so the loading-state fallback doesn't churn identity.
+const EMPTY_CURRICULUM: Curriculum = {};
 import { sendMessage } from "../lib/claude";
 import { Markdown } from "../lib/markdown";
 import { speak, stopSpeaking, speechSupported } from "../lib/speech";
@@ -299,9 +302,24 @@ export function AITutor({
   user,
   initialProgress,
   onProgressChange,
+  loadCurriculum,
+  loadProgress,
+  onTranscript,
 }: AITutorProps) {
   const [launcherOpen, setLauncherOpen] = useState(false);
-  const moduleKeys = Object.keys(curriculum);
+
+  // ── Curriculum source: static prop, or async-loaded from the host's DB ──────
+  const [remoteCurriculum, setRemoteCurriculum] = useState<Curriculum | null>(null);
+  const [curriculumLoading, setCurriculumLoading] = useState<boolean>(!!loadCurriculum);
+  const [curriculumError, setCurriculumError] = useState<string | null>(null);
+
+  // While a loader is still fetching, show nothing (loading state) rather than
+  // flashing the static fallback. On success use the remote data; on failure
+  // fall back to the `curriculum` prop (which defaults to the demo).
+  const activeCurriculum: Curriculum =
+    remoteCurriculum ?? (loadCurriculum && curriculumLoading ? EMPTY_CURRICULUM : curriculum);
+
+  const moduleKeys = useMemo(() => Object.keys(activeCurriculum), [activeCurriculum]);
   const [selectedKey, setSelectedKey] = useState(moduleKeys[0] ?? "");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -328,14 +346,68 @@ export function AITutor({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const didMountProgress = useRef(false);
+  // Set when we seed state from an async source (loadProgress) so the persist
+  // effect skips that one change and doesn't write the loaded value back out.
+  const skipNextPersist = useRef(false);
 
   useEffect(() => injectStyles(), []);
+
+  // ── Load curriculum from the host's backend/DB when a loader is provided ────
+  useEffect(() => {
+    if (!loadCurriculum) return;
+    let cancelled = false;
+    setCurriculumLoading(true);
+    setCurriculumError(null);
+    loadCurriculum()
+      .then((c) => {
+        if (!cancelled) setRemoteCurriculum(c);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setCurriculumError(err instanceof Error ? err.message : "Failed to load curriculum.");
+      })
+      .finally(() => {
+        if (!cancelled) setCurriculumLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCurriculum]);
+
+  // Keep the selected module valid as the curriculum arrives or changes.
+  useEffect(() => {
+    if (moduleKeys.length === 0) return;
+    if (!selectedKey || !activeCurriculum[selectedKey]) setSelectedKey(moduleKeys[0]);
+  }, [moduleKeys, selectedKey, activeCurriculum]);
+
+  // ── Load saved progress from the host's backend/DB when a loader is provided ─
+  useEffect(() => {
+    if (!loadProgress) return;
+    let cancelled = false;
+    Promise.resolve(loadProgress(user?.id))
+      .then((p) => {
+        if (cancelled || !p) return;
+        skipNextPersist.current = true;
+        setCounts(p.counts ?? {});
+        setTypingXp(p.typingXp ?? 0);
+      })
+      .catch(() => {
+        /* load failed — keep whatever defaults we seeded with */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadProgress, user?.id]);
 
   // Persist progress — emit to the host, or fall back to localStorage.
   useEffect(() => {
     if (!didMountProgress.current) {
       didMountProgress.current = true;
       return; // don't echo the seeded value back on mount
+    }
+    if (skipNextPersist.current) {
+      skipNextPersist.current = false;
+      return; // this change came from loadProgress, not the learner
     }
     if (controlled) {
       onProgressChange?.({ counts, typingXp });
@@ -365,7 +437,7 @@ export function AITutor({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const activeModule = curriculum[selectedKey];
+  const activeModule = activeCurriculum[selectedKey];
   const activeModality = MODALITIES.find((m) => m.key === modality)!;
 
   const resolvedSystemPrompt =
@@ -409,12 +481,20 @@ export function AITutor({
         { role: "assistant", content: reply, id: generateId() },
       ]);
       if (modality === "audio") speak(reply); // read it aloud in audio mode
+      // Hand the completed turn to the host to persist (fire-and-forget).
+      if (onTranscript) {
+        try {
+          onTranscript({ module: selectedKey, question: text, reply, modality, userId: user?.id });
+        } catch {
+          /* host persistence failing must never break the chat */
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setIsLoading(false);
     }
-  }, [api, input, isLoading, messages, model, modality, resolvedSystemPrompt, selectedKey]);
+  }, [api, input, isLoading, messages, model, modality, resolvedSystemPrompt, selectedKey, onTranscript, user?.id]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -437,6 +517,12 @@ export function AITutor({
   const fill2 = "rgba(118,118,128,0.2)";
   const groupBg = "#F2F2F7";
   const tint = (c: string, a: string) => `${c}${a}`;
+
+  // When a curriculum loader is running (or failed) and we have no modules yet,
+  // the chat/typing/progress body is replaced by a loading or error state.
+  const showCurriculumLoading = !!loadCurriculum && curriculumLoading && moduleKeys.length === 0;
+  const showCurriculumError = !!curriculumError && moduleKeys.length === 0;
+  const curriculumBlocked = showCurriculumLoading || showCurriculumError;
 
   // In floating mode the ✕ always shows and collapses back to the launcher.
   const showClose = position ? true : typeof onClose === "function";
@@ -612,8 +698,53 @@ export function AITutor({
         {segmented}
       </div>
 
+      {/* ── Curriculum loading / error state (async loader) ── */}
+      {curriculumBlocked && (
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 14,
+            padding: "40px 28px",
+            background: "#fff",
+            textAlign: "center",
+          }}
+        >
+          {showCurriculumError ? (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 600, color: ink }}>
+                Couldn't load the curriculum
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.5, color: ink2 }}>{curriculumError}</div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: 5 }}>
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: primaryColor,
+                      animation: "ai-tutor-bounce 1.2s ease-in-out infinite",
+                      animationDelay: `${i * 0.18}s`,
+                    }}
+                  />
+                ))}
+              </div>
+              <div style={{ fontSize: 14, color: ink2 }}>Loading curriculum…</div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Toolbar: Modules + modality picker ── */}
-      {view !== "progress" && (
+      {!curriculumBlocked && view !== "progress" && (
         <div
           style={{
             display: "flex",
@@ -693,7 +824,7 @@ export function AITutor({
       )}
 
       {/* ── CHAT VIEW ── */}
-      {view === "chat" && (
+      {!curriculumBlocked && view === "chat" && (
         <>
           <div
             className="ai-tutor-scroll"
@@ -908,7 +1039,7 @@ export function AITutor({
       )}
 
       {/* ── TYPING VIEW (gamified drill) ── */}
-      {view === "typing" && (
+      {!curriculumBlocked && view === "typing" && (
         <TypingView
           key={selectedKey}
           content={activeModule?.content ?? ""}
@@ -920,7 +1051,7 @@ export function AITutor({
       )}
 
       {/* ── PROGRESS VIEW (gamification) ── */}
-      {view === "progress" && (
+      {!curriculumBlocked && view === "progress" && (
         <div
           className="ai-tutor-scroll"
           style={{ flex: 1, overflowY: "auto", padding: "18px 16px 24px", background: groupBg }}
@@ -1004,7 +1135,7 @@ export function AITutor({
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {curriculum[k].label}
+                      {activeCurriculum[k].label}
                     </div>
                     <div style={{ height: 5, borderRadius: 3, background: fill, marginTop: 6, overflow: "hidden" }}>
                       <div
@@ -1141,7 +1272,7 @@ export function AITutor({
                           color: ink,
                         }}
                       >
-                        {curriculum[k].label}
+                        {activeCurriculum[k].label}
                       </span>
                       {mastered && <span style={{ fontSize: 14 }}>🏆</span>}
                       {selected && <Glyph k="check" size={18} color={primaryColor} stroke={2.4} />}
