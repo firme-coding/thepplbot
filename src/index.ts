@@ -12,6 +12,7 @@ export { DEMO_CURRICULUM } from "./curriculum";
 export type {
   AITutorProps,
   BrandConfig,
+  Theme,
   ApiConfig,
   Curriculum,
   CurriculumModule,

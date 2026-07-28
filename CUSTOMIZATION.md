@@ -23,6 +23,45 @@ Both accept any valid CSS hex color. Try your brand colors — they apply instan
 
 ---
 
+## Dark mode
+
+`primaryColor` / `secondaryColor` are your brand accents. The neutral chrome around them — panel background, text, cards, message bubbles — is controlled by `theme`:
+
+```tsx
+<AITutor theme="dark" />   // dark chrome
+<AITutor theme="light" />  // default
+<AITutor theme="auto" />   // follow the visitor's OS setting, live
+```
+
+- `light` (default) is the iOS-light look.
+- `dark` swaps the background to near-black with light text, so the widget sits comfortably inside a dark app.
+- `auto` reads `prefers-color-scheme` and re-renders when the visitor changes their OS appearance.
+
+Your accents apply in both themes, so a color that reads well on white bubbles still works. If your accent is very dark, it can be low-contrast against the dark panel — bump `primaryColor` a shade lighter for dark mode if you drive `theme` from your own toggle:
+
+```tsx
+<AITutor
+  theme={appIsDark ? "dark" : "light"}
+  primaryColor={appIsDark ? "#4B9BFF" : "#007AFF"}
+/>
+```
+
+---
+
+## Launcher icon (floating mode)
+
+In floating mode (`position` set), the closed bubble shows a built-in chat glyph. Swap it with `launcherIcon`:
+
+```tsx
+<AITutor position="bottom-right" launcherIcon="/bot.png" />   {/* image URL or path */}
+<AITutor position="bottom-right" launcherIcon="🤖" />         {/* emoji or short text */}
+<AITutor position="bottom-right" launcherIcon={<MyIcon />} /> {/* any React node */}
+```
+
+A string that looks like a URL or path (starts with `http`, `/`, `./`, or `data:`) renders as an `<img>` sized to fit the 58×58 bubble; any other string renders as text/emoji. The open-state button always shows the ✕ so learners can close the panel.
+
+---
+
 ## Logo and org name
 
 ```tsx

@@ -19,6 +19,8 @@ The bundled demo content is a live tour of [Firme Coding](https://firmecoding.or
   - **Progress** — level ring, XP, module mastery, and badges.
 - **Learning modalities** — reading · visual · audio · images · hands-on. Picking one tailors how the tutor explains. Audio is spoken via the browser; for real photos in *images* mode, see the [Unsplash recipe](./CUSTOMIZATION.md#real-images-unsplash).
 - **Gamification** — earn XP from questions and typing, level up, master modules, unlock badges. Progress persists in `localStorage`.
+- **Light / dark / auto theme** — `theme` recolors the chrome to match your app; `auto` follows the visitor's OS setting. Your brand accents stay put. See [Dark mode](#dark-mode).
+- **Custom launcher icon** — swap the floating bubble's glyph for your own image, emoji, or React node via `launcherIcon`. See [Custom launcher icon](#custom-launcher-icon).
 - **Expand & close** — resize the widget or dismiss it via the `onClose` prop.
 - **Bring your own model & curriculum** — any Claude model, any content.
 
@@ -85,6 +87,35 @@ Pass `position` to dock it as a chat bubble in a viewport corner. It opens on ta
 
 Without `position`, the widget renders inline and fills its parent container (give the parent a height).
 
+### Custom launcher icon
+
+By default the bubble shows a built-in chat glyph. Pass `launcherIcon` to make it match your app — an image URL, an emoji, or any React node:
+
+```tsx
+<AITutor api={{ apiEndpoint: "/api/tutor" }} position="bottom-right" launcherIcon="/bot.png" />
+<AITutor api={{ apiEndpoint: "/api/tutor" }} position="bottom-right" launcherIcon="🤖" />
+<AITutor api={{ apiEndpoint: "/api/tutor" }} position="bottom-right" launcherIcon={<MyIcon />} />
+```
+
+The open-state button always shows the ✕ so learners can close it.
+
+---
+
+## Dark mode
+
+`theme` recolors the chrome (panel background, text, cards, bubbles) so the widget matches your app. Your `primaryColor` / `secondaryColor` accents stay the same in both themes.
+
+```tsx
+<AITutor api={{ apiEndpoint: "/api/tutor" }} theme="dark" />   // or "light" (default)
+<AITutor api={{ apiEndpoint: "/api/tutor" }} theme="auto" />   // follow the OS, live
+```
+
+`auto` reads `prefers-color-scheme` and switches when the visitor toggles their OS appearance. If your app has its own theme toggle, drive `theme` from your state instead:
+
+```tsx
+<AITutor api={{ apiEndpoint: "/api/tutor" }} theme={appIsDark ? "dark" : "light"} />
+```
+
 ---
 
 ## Props
@@ -98,6 +129,8 @@ Only `api` is required. Everything else is optional.
 | `logoUrl` | no | `string` | — | Logo shown in the header instead of the letter avatar |
 | `primaryColor` | no | `string` | `"#007AFF"` | Accent color — user bubbles, send button, active states |
 | `secondaryColor` | no | `string` | `"#5856D6"` | Gradient partner — level ring, avatar, badges |
+| `theme` | no | `"light" \| "dark" \| "auto"` | `"light"` | Chrome theme (backgrounds, text, surfaces). `auto` follows the visitor's OS setting |
+| `launcherIcon` | no | `ReactNode` | — | Custom icon for the floating bubble: image URL, emoji, or any React node. See below |
 | `curriculum` | no | `Curriculum` | demo curriculum | Your custom curriculum — see CUSTOMIZATION.md |
 | `model` | no | `string` | `"claude-haiku-4-5-20251001"` | Claude model to use |
 | `systemPrompt` | no | `string` | Built-in Socratic prompt | Override the AI's behavior entirely |

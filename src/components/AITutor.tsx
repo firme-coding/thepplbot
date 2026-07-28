@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import type { ReactNode } from "react";
 import type { ChatMessage, AITutorProps, Modality, Curriculum } from "../types";
 import { DEMO_CURRICULUM } from "../curriculum";
 
@@ -13,6 +14,81 @@ const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 // iOS system font stack — the point of the design is that it feels native.
 const FONT =
   '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif';
+
+// ── Theme tokens ─────────────────────────────────────────────────────────────
+// Every neutral color the chrome uses lives here so light/dark is a single swap.
+// Brand accents (primaryColor/secondaryColor) are passed in separately and apply
+// unchanged in both themes.
+export interface Tokens {
+  ink: string; // primary text
+  ink2: string; // secondary text
+  ink3: string; // faint text (chevrons, untyped chars)
+  sep: string; // hairline separators
+  fill: string; // subtle button/pill fill
+  fill2: string; // stronger fill (disabled send, handles)
+  groupBg: string; // grouped background (progress view, sheets)
+  panelBg: string; // main panel + chat/toolbar/input surfaces
+  surface: string; // raised cards, bubbles-in, inputs
+  navBg: string; // frosted bars (nav + input bar)
+  bubble: string; // assistant message bubble
+  segActive: string; // active segmented / modality control
+  dot: string; // typing-indicator dots
+  border: string; // panel outer border
+}
+
+function makeTokens(dark: boolean): Tokens {
+  return dark
+    ? {
+        ink: "#F5F5F7",
+        ink2: "rgba(235,235,245,0.6)",
+        ink3: "rgba(235,235,245,0.3)",
+        sep: "rgba(235,235,245,0.14)",
+        fill: "rgba(118,118,128,0.24)",
+        fill2: "rgba(118,118,128,0.36)",
+        groupBg: "#000000",
+        panelBg: "#1C1C1E",
+        surface: "#2C2C2E",
+        navBg: "rgba(30,30,32,0.8)",
+        bubble: "#3A3A3C",
+        segActive: "#636366",
+        dot: "rgba(235,235,245,0.45)",
+        border: "rgba(255,255,255,0.1)",
+      }
+    : {
+        ink: "#1C1C1E",
+        ink2: "rgba(60,60,67,0.6)",
+        ink3: "rgba(60,60,67,0.3)",
+        sep: "rgba(60,60,67,0.14)",
+        fill: "rgba(118,118,128,0.12)",
+        fill2: "rgba(118,118,128,0.2)",
+        groupBg: "#F2F2F7",
+        panelBg: "#ffffff",
+        surface: "#ffffff",
+        navBg: "rgba(255,255,255,0.72)",
+        bubble: "#E9E9EB",
+        segActive: "#ffffff",
+        dot: "rgba(60,60,67,0.45)",
+        border: "rgba(0,0,0,0.08)",
+      };
+}
+
+// Render a caller-supplied launcher icon: an image URL/path → <img>, an emoji or
+// short string → text, any other React node → as-is.
+function renderLauncherIcon(icon: ReactNode): ReactNode {
+  if (typeof icon === "string") {
+    const looksLikeUrl = /^(https?:|data:|blob:|\/|\.\.?\/)/.test(icon);
+    if (looksLikeUrl)
+      return (
+        <img
+          src={icon}
+          alt=""
+          style={{ width: 30, height: 30, objectFit: "contain", borderRadius: 8 }}
+        />
+      );
+    return <span style={{ fontSize: 26, lineHeight: 1 }}>{icon}</span>;
+  }
+  return icon;
+}
 
 const MASTERY_THRESHOLD = 3; // questions in a module before it counts as "mastered"
 const XP_PER_QUESTION = 10;
@@ -292,6 +368,7 @@ export function AITutor({
   logoUrl,
   primaryColor = "#007AFF",
   secondaryColor = "#5856D6",
+  theme = "light",
   model = DEFAULT_MODEL,
   systemPrompt,
   placeholder = "Ask a question…",
@@ -299,6 +376,7 @@ export function AITutor({
   onClose,
   defaultModality = "reading",
   position,
+  launcherIcon,
   user,
   initialProgress,
   onProgressChange,
@@ -351,6 +429,18 @@ export function AITutor({
   const skipNextPersist = useRef(false);
 
   useEffect(() => injectStyles(), []);
+
+  // ── Theme: resolve light/dark, following the OS when theme="auto" ────────────
+  const [systemDark, setSystemDark] = useState(false);
+  useEffect(() => {
+    if (theme !== "auto" || typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, [theme]);
+  const isDark = theme === "dark" || (theme === "auto" && systemDark);
 
   // ── Load curriculum from the host's backend/DB when a loader is provided ────
   useEffect(() => {
@@ -510,12 +600,8 @@ export function AITutor({
   };
 
   // ── Design tokens ──────────────────────────────────────────────────────────
-  const ink = "#1C1C1E";
-  const ink2 = "rgba(60,60,67,0.6)";
-  const sep = "rgba(60,60,67,0.14)";
-  const fill = "rgba(118,118,128,0.12)";
-  const fill2 = "rgba(118,118,128,0.2)";
-  const groupBg = "#F2F2F7";
+  const t = useMemo(() => makeTokens(isDark), [isDark]);
+  const { ink, ink2, sep, fill, fill2, groupBg } = t;
   const tint = (c: string, a: string) => `${c}${a}`;
 
   // When a curriculum loader is running (or failed) and we have no modules yet,
@@ -581,7 +667,7 @@ export function AITutor({
               fontSize: 13,
               fontWeight: 600,
               color: active ? ink : ink2,
-              background: active ? "#fff" : "transparent",
+              background: active ? t.segActive : "transparent",
               boxShadow: active ? "0 1px 3px rgba(0,0,0,0.14)" : "none",
               textTransform: "capitalize",
             }}
@@ -611,8 +697,8 @@ export function AITutor({
         boxShadow:
           "0 20px 50px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.10)",
         fontFamily: FONT,
-        background: view === "progress" ? groupBg : "#ffffff",
-        border: "0.5px solid rgba(0,0,0,0.08)",
+        background: view === "progress" ? groupBg : t.panelBg,
+        border: `0.5px solid ${t.border}`,
         transition: "max-width .32s cubic-bezier(.22,1,.36,1), max-height .32s cubic-bezier(.22,1,.36,1), background .25s",
       }}
     >
@@ -620,7 +706,7 @@ export function AITutor({
       <div
         style={{
           padding: "12px 14px 10px",
-          background: "rgba(255,255,255,0.72)",
+          background: t.navBg,
           backdropFilter: "saturate(180%) blur(20px)",
           WebkitBackdropFilter: "saturate(180%) blur(20px)",
           borderBottom: `0.5px solid ${sep}`,
@@ -709,7 +795,7 @@ export function AITutor({
             justifyContent: "center",
             gap: 14,
             padding: "40px 28px",
-            background: "#fff",
+            background: t.panelBg,
             textAlign: "center",
           }}
         >
@@ -753,7 +839,7 @@ export function AITutor({
             gap: 8,
             padding: "10px 14px",
             borderBottom: `0.5px solid ${sep}`,
-            background: "#fff",
+            background: t.panelBg,
           }}
         >
           <button
@@ -804,7 +890,7 @@ export function AITutor({
                       border: "none",
                       cursor: "pointer",
                       borderRadius: 8,
-                      background: active ? "#fff" : "transparent",
+                      background: active ? t.segActive : "transparent",
                       boxShadow: active ? "0 1px 3px rgba(0,0,0,0.16)" : "none",
                       display: "flex",
                       alignItems: "center",
@@ -828,7 +914,7 @@ export function AITutor({
         <>
           <div
             className="ai-tutor-scroll"
-            style={{ flex: 1, overflowY: "auto", padding: "16px 0", background: "#fff" }}
+            style={{ flex: 1, overflowY: "auto", padding: "16px 0", background: t.panelBg }}
           >
             {messages.length === 0 && (
               <div
@@ -886,7 +972,7 @@ export function AITutor({
                       whiteSpace: isUser ? "pre-wrap" : "normal",
                       wordBreak: "break-word",
                       color: isUser ? "#fff" : ink,
-                      background: isUser ? primaryColor : "#E9E9EB",
+                      background: isUser ? primaryColor : t.bubble,
                       borderRadius: 20,
                       borderBottomRightRadius: isUser ? 6 : 20,
                       borderBottomLeftRadius: isUser ? 20 : 6,
@@ -930,7 +1016,7 @@ export function AITutor({
                     padding: "12px 16px",
                     borderRadius: 20,
                     borderBottomLeftRadius: 6,
-                    background: "#E9E9EB",
+                    background: t.bubble,
                     display: "flex",
                     gap: 4,
                   }}
@@ -942,7 +1028,7 @@ export function AITutor({
                         width: 7,
                         height: 7,
                         borderRadius: "50%",
-                        background: "rgba(60,60,67,0.45)",
+                        background: t.dot,
                         animation: "ai-tutor-bounce 1.2s ease-in-out infinite",
                         animationDelay: `${i * 0.18}s`,
                       }}
@@ -974,7 +1060,7 @@ export function AITutor({
             style={{
               padding: "10px 12px calc(10px + env(safe-area-inset-bottom))",
               borderTop: `0.5px solid ${sep}`,
-              background: "rgba(255,255,255,0.86)",
+              background: t.navBg,
               backdropFilter: "saturate(180%) blur(20px)",
               WebkitBackdropFilter: "saturate(180%) blur(20px)",
               display: "flex",
@@ -1000,7 +1086,7 @@ export function AITutor({
                 fontFamily: FONT,
                 lineHeight: 1.4,
                 outline: "none",
-                background: "#fff",
+                background: t.surface,
                 color: ink,
                 overflow: "hidden",
                 transition: "border-color .15s, box-shadow .15s",
@@ -1046,6 +1132,7 @@ export function AITutor({
           moduleLabel={activeModule?.label ?? ""}
           primary={primaryColor}
           secondary={secondaryColor}
+          t={t}
           onAward={(amt) => setTypingXp((x) => x + amt)}
         />
       )}
@@ -1065,7 +1152,7 @@ export function AITutor({
 
           {/* Level ring */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
-            <LevelRing pct={levelPct} level={level} primary={primaryColor} secondary={secondaryColor} />
+            <LevelRing pct={levelPct} level={level} primary={primaryColor} secondary={secondaryColor} t={t} />
             <div style={{ marginTop: 10, fontSize: 13, color: ink2 }}>
               {xpIntoLevel} / {XP_PER_LEVEL} XP to Level {level + 1}
             </div>
@@ -1073,14 +1160,14 @@ export function AITutor({
 
           {/* Stat chips */}
           <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
-            <StatChip value={String(totalQuestions)} label="Questions" emoji="💬" />
-            <StatChip value={`${masteredKeys.length}/${moduleKeys.length}`} label="Mastered" emoji="🏆" />
-            <StatChip value={String(visitedKeys.length)} label="Explored" emoji="🧭" />
+            <StatChip value={String(totalQuestions)} label="Questions" emoji="💬" t={t} />
+            <StatChip value={`${masteredKeys.length}/${moduleKeys.length}`} label="Mastered" emoji="🏆" t={t} />
+            <StatChip value={String(visitedKeys.length)} label="Explored" emoji="🧭" t={t} />
           </div>
 
           {/* Module progress list */}
           <SectionLabel text="Modules" ink2={ink2} />
-          <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", marginBottom: 22 }}>
+          <div style={{ background: t.surface, borderRadius: 14, overflow: "hidden", marginBottom: 22 }}>
             {moduleKeys.map((k, i) => {
               const c = counts[k] ?? 0;
               const mastered = c >= MASTERY_THRESHOLD;
@@ -1149,7 +1236,7 @@ export function AITutor({
                       />
                     </div>
                   </div>
-                  <Glyph k="chevron" size={16} color="rgba(60,60,67,0.3)" />
+                  <Glyph k="chevron" size={16} color={t.ink3} />
                 </button>
               );
             })}
@@ -1158,14 +1245,15 @@ export function AITutor({
           {/* Badges */}
           <SectionLabel text="Badges" ink2={ink2} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
-            <Badge emoji="🎯" title="First Question" earned={totalQuestions >= 1} primary={primaryColor} />
-            <Badge emoji="💡" title="Curious Mind" sub="Ask 5" earned={totalQuestions >= 5} primary={primaryColor} />
+            <Badge emoji="🎯" title="First Question" earned={totalQuestions >= 1} primary={primaryColor} t={t} />
+            <Badge emoji="💡" title="Curious Mind" sub="Ask 5" earned={totalQuestions >= 5} primary={primaryColor} t={t} />
             <Badge
               emoji="🧭"
               title="Explorer"
               sub="Visit all"
               earned={visitedKeys.length === moduleKeys.length && moduleKeys.length > 0}
               primary={primaryColor}
+              t={t}
             />
             <Badge
               emoji="🎓"
@@ -1173,8 +1261,9 @@ export function AITutor({
               sub="Master all"
               earned={masteredKeys.length === moduleKeys.length && moduleKeys.length > 0}
               primary={primaryColor}
+              t={t}
             />
-            <Badge emoji="⌨️" title="Typist" sub="Type 3 terms" earned={typingXp >= 45} primary={primaryColor} />
+            <Badge emoji="⌨️" title="Typist" sub="Type 3 terms" earned={typingXp >= 45} primary={primaryColor} t={t} />
           </div>
         </div>
       )}
@@ -1238,7 +1327,7 @@ export function AITutor({
               </button>
             </div>
             <div className="ai-tutor-scroll" style={{ overflowY: "auto", padding: "0 12px 16px" }}>
-              <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden" }}>
+              <div style={{ background: t.surface, borderRadius: 14, overflow: "hidden" }}>
                 {moduleKeys.map((k, i) => {
                   const selected = k === selectedKey;
                   const mastered = (counts[k] ?? 0) >= MASTERY_THRESHOLD;
@@ -1312,7 +1401,13 @@ export function AITutor({
         justifyContent: "center",
       }}
     >
-      <Glyph k={launcherOpen ? "close" : "chat"} size={26} color="#fff" stroke={2.2} />
+      {launcherOpen ? (
+        <Glyph k="close" size={26} color="#fff" stroke={2.2} />
+      ) : launcherIcon != null && launcherIcon !== false ? (
+        renderLauncherIcon(launcherIcon)
+      ) : (
+        <Glyph k="chat" size={26} color="#fff" stroke={2.2} />
+      )}
     </button>
   );
 
@@ -1363,12 +1458,14 @@ function TypingView({
   moduleLabel,
   primary,
   secondary,
+  t,
   onAward,
 }: {
   content: string;
   moduleLabel: string;
   primary: string;
   secondary: string;
+  t: Tokens;
   onAward: (amount: number) => void;
 }) {
   const lines = useMemo(() => drillLines(content), [content]);
@@ -1379,9 +1476,7 @@ function TypingView({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const target = lines[idx] ?? "";
-  const ink = "#1C1C1E";
-  const ink2 = "rgba(60,60,67,0.6)";
-  const fill = "rgba(118,118,128,0.12)";
+  const { ink, ink2, fill } = t;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1418,7 +1513,7 @@ function TypingView({
         flex: 1,
         overflowY: "auto",
         padding: "20px 18px 22px",
-        background: "#fff",
+        background: t.panelBg,
         display: "flex",
         flexDirection: "column",
       }}
@@ -1456,7 +1551,7 @@ function TypingView({
                     ? "#FF3B30"
                     : state === "cur"
                     ? ink
-                    : "rgba(60,60,67,0.32)",
+                    : t.ink3,
                 background:
                   state === "bad"
                     ? "rgba(255,59,48,0.14)"
@@ -1485,13 +1580,13 @@ function TypingView({
         style={{
           width: "100%",
           boxSizing: "border-box",
-          border: `0.5px solid rgba(118,118,128,0.2)`,
+          border: `0.5px solid ${t.fill2}`,
           borderRadius: 14,
           padding: "12px 15px",
           fontSize: 16,
           fontFamily: FONT,
           outline: "none",
-          background: done ? fill : "#fff",
+          background: done ? fill : t.surface,
           color: ink,
         }}
         onFocus={(e) => {
@@ -1499,16 +1594,16 @@ function TypingView({
           e.currentTarget.style.boxShadow = `0 0 0 3.5px ${primary}1f`;
         }}
         onBlur={(e) => {
-          e.currentTarget.style.borderColor = "rgba(118,118,128,0.2)";
+          e.currentTarget.style.borderColor = t.fill2;
           e.currentTarget.style.boxShadow = "none";
         }}
       />
 
       {/* Stats */}
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <TypingStat value={String(wpm)} label="WPM" />
-        <TypingStat value={`${accuracy}%`} label="Accuracy" />
-        <TypingStat value={`${typed.length}/${target.length}`} label="Chars" />
+        <TypingStat value={String(wpm)} label="WPM" t={t} />
+        <TypingStat value={`${accuracy}%`} label="Accuracy" t={t} />
+        <TypingStat value={`${typed.length}/${target.length}`} label="Chars" t={t} />
       </div>
 
       {done && (
@@ -1574,11 +1669,11 @@ function TypingView({
   );
 }
 
-function TypingStat({ value, label }: { value: string; label: string }) {
+function TypingStat({ value, label, t }: { value: string; label: string; t: Tokens }) {
   return (
-    <div style={{ flex: 1, background: "rgba(118,118,128,0.1)", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-      <div style={{ fontSize: 18, fontWeight: 700, color: "#1C1C1E", letterSpacing: "-0.02em" }}>{value}</div>
-      <div style={{ fontSize: 11, color: "rgba(60,60,67,0.6)", marginTop: 1 }}>{label}</div>
+    <div style={{ flex: 1, background: t.fill, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: t.ink, letterSpacing: "-0.02em" }}>{value}</div>
+      <div style={{ fontSize: 11, color: t.ink2, marginTop: 1 }}>{label}</div>
     </div>
   );
 }
@@ -1589,11 +1684,13 @@ function LevelRing({
   level,
   primary,
   secondary,
+  t,
 }: {
   pct: number;
   level: number;
   primary: string;
   secondary: string;
+  t: Tokens;
 }) {
   const size = 128;
   const stroke = 12;
@@ -1609,7 +1706,7 @@ function LevelRing({
             <stop offset="100%" stopColor={secondary} />
           </linearGradient>
         </defs>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(118,118,128,0.16)" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={t.fill2} strokeWidth={stroke} />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -1633,10 +1730,10 @@ function LevelRing({
           justifyContent: "center",
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(60,60,67,0.6)" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: t.ink2 }}>
           LEVEL
         </div>
-        <div style={{ fontSize: 40, fontWeight: 800, color: "#1C1C1E", lineHeight: 1, letterSpacing: "-0.03em" }}>
+        <div style={{ fontSize: 40, fontWeight: 800, color: t.ink, lineHeight: 1, letterSpacing: "-0.03em" }}>
           {level}
         </div>
       </div>
@@ -1644,20 +1741,20 @@ function LevelRing({
   );
 }
 
-function StatChip({ value, label, emoji }: { value: string; label: string; emoji: string }) {
+function StatChip({ value, label, emoji, t }: { value: string; label: string; emoji: string; t: Tokens }) {
   return (
     <div
       style={{
         flex: 1,
-        background: "#fff",
+        background: t.surface,
         borderRadius: 14,
         padding: "12px 8px",
         textAlign: "center",
       }}
     >
       <div style={{ fontSize: 18, marginBottom: 2 }}>{emoji}</div>
-      <div style={{ fontSize: 19, fontWeight: 700, color: "#1C1C1E", letterSpacing: "-0.02em" }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: "rgba(60,60,67,0.6)", marginTop: 1 }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 700, color: t.ink, letterSpacing: "-0.02em" }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: t.ink2, marginTop: 1 }}>{label}</div>
     </div>
   );
 }
@@ -1685,17 +1782,19 @@ function Badge({
   sub,
   earned,
   primary,
+  t,
 }: {
   emoji: string;
   title: string;
   sub?: string;
   earned: boolean;
   primary: string;
+  t: Tokens;
 }) {
   return (
     <div
       style={{
-        background: "#fff",
+        background: t.surface,
         borderRadius: 14,
         padding: "14px 12px",
         display: "flex",
@@ -1714,8 +1813,8 @@ function Badge({
         {emoji}
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: "#1C1C1E", lineHeight: 1.15 }}>{title}</div>
-        <div style={{ fontSize: 11.5, color: earned ? primary : "rgba(60,60,67,0.6)", marginTop: 1 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: t.ink, lineHeight: 1.15 }}>{title}</div>
+        <div style={{ fontSize: 11.5, color: earned ? primary : t.ink2, marginTop: 1 }}>
           {earned ? "Earned" : sub ?? "Locked"}
         </div>
       </div>

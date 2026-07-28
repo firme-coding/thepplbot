@@ -220,6 +220,61 @@ check(
 );
 check("onTranscript turn: after a real question, progress DOES persist", dbProgressUpdates.length === 1);
 
+// 8. Theme: dark mode recolors the panel background away from white
+const tContainer = document.createElement("div");
+document.body.appendChild(tContainer);
+const tRoot = createRoot(tContainer);
+await act(async () => {
+  tRoot.render(
+    React.createElement(AITutor, {
+      api: { apiEndpoint: "/api/tutor" },
+      orgName: "Firme Coding",
+      theme: "dark",
+    }),
+  );
+});
+const panelBg = [...tContainer.querySelectorAll("div")]
+  .map((d) => d.style.background)
+  .find((b) => b && (b.includes("#1C1C1E") || b.includes("28, 28, 30")));
+check("theme=dark: panel uses dark background (#1C1C1E)", !!panelBg);
+check(
+  "theme=dark: no white panel surface remains",
+  ![...tContainer.querySelectorAll("div")].some((d) => {
+    const b = d.style.background;
+    return b === "rgb(255, 255, 255)" || b === "#ffffff" || b === "#fff";
+  }),
+);
+
+// 9. launcherIcon: custom emoji replaces the built-in glyph on the closed bubble
+const iContainer = document.createElement("div");
+document.body.appendChild(iContainer);
+const iRoot = createRoot(iContainer);
+await act(async () => {
+  iRoot.render(
+    React.createElement(AITutor, {
+      api: { apiEndpoint: "/api/tutor" },
+      orgName: "Firme Coding",
+      position: "bottom-right",
+      launcherIcon: "🤖",
+    }),
+  );
+});
+check("launcherIcon: custom emoji shown on the launcher", iContainer.textContent.includes("🤖"));
+check(
+  "launcherIcon: built-in chat glyph not rendered when custom icon is set",
+  !iContainer.querySelector('button[aria-label="Open chat"] svg'),
+);
+await act(async () => {
+  iContainer
+    .querySelector('button[aria-label="Open chat"]')
+    .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+});
+check(
+  "launcherIcon: open state shows the ✕ glyph, not the custom icon",
+  !!iContainer.querySelector('button[aria-label="Close chat"] svg') &&
+    !iContainer.querySelector('button[aria-label="Close chat"]').textContent.includes("🤖"),
+);
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

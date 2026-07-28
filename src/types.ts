@@ -2,6 +2,20 @@
 // AI Tutor — TypeScript Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { ReactNode } from "react";
+
+/**
+ * Color theme for the widget chrome (backgrounds, text, surfaces).
+ * - "light" (default): the iOS-light look.
+ * - "dark": a dark chrome that matches a dark-themed host app.
+ * - "auto": follows the visitor's OS setting (prefers-color-scheme) and updates
+ *   live when they toggle it.
+ *
+ * `primaryColor` / `secondaryColor` are your brand accents and apply in both
+ * themes — only the neutral chrome changes.
+ */
+export type Theme = "light" | "dark" | "auto";
+
 /** A single curriculum module */
 export interface CurriculumModule {
   /** Display name shown in the module selector dropdown */
@@ -103,6 +117,12 @@ export interface BrandConfig {
   primaryColor?: string;
   /** Secondary accent (hex), used for gradients. Defaults to iOS indigo #5856D6 */
   secondaryColor?: string;
+  /**
+   * Color theme for the chrome. "light" (default), "dark", or "auto" to follow
+   * the visitor's OS setting. Your `primaryColor`/`secondaryColor` accents apply
+   * in both themes.
+   */
+  theme?: Theme;
 }
 
 /** All props for the <AITutor /> component */
@@ -135,6 +155,16 @@ export interface AITutorProps extends BrandConfig {
    * inline, filling the parent container.
    */
   position?: ChatPosition;
+  /**
+   * Custom icon for the floating launcher button (the closed-state chat bubble
+   * in `position` mode). Pass:
+   *   • an image URL / path — `launcherIcon="/bot.png"` → rendered as an <img>
+   *   • an emoji or short text — `launcherIcon="🤖"`
+   *   • any React node — `launcherIcon={<MyIcon />}`
+   * Omit to use the built-in chat glyph. (The open-state button always shows the
+   * ✕ so learners can close it.)
+   */
+  launcherIcon?: ReactNode;
   /**
    * The signed-in learner (id, name, gameName). Pass this from your platform.
    * `name` is used to address the learner; `gameName` shows in the UI; `id`
