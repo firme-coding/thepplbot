@@ -107,7 +107,11 @@ await act(async () => {
     .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 });
 check("Typing view renders WPM stat", container.textContent.includes("WPM"));
-check("Typing view has a drill input", !!container.querySelector('input[placeholder="Start typing…"]'));
+check(
+  "Typing view has a drill input",
+  !!container.querySelector('input[aria-label="Type the sentence above"]'),
+);
+check("Typing view renders the finger keyboard", container.textContent.includes("LEFT HAND"));
 
 // 5. Floating launcher mode (position prop)
 const fContainer = document.createElement("div");
