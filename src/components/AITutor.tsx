@@ -686,11 +686,11 @@ export function AITutor({
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        maxWidth: expanded ? 720 : 460,
+        maxWidth: expanded ? "none" : view === "typing" ? 760 : 460,
         margin: "0 auto",
         height: "100%",
-        minHeight: expanded ? 620 : 540,
-        maxHeight: expanded ? 900 : 760,
+        minHeight: expanded ? 0 : view === "typing" ? 560 : 540,
+        maxHeight: expanded ? "none" : view === "typing" ? 900 : 760,
         borderRadius: 26,
         overflow: "hidden",
         position: "relative",
@@ -1133,6 +1133,8 @@ export function AITutor({
           primary={primaryColor}
           secondary={secondaryColor}
           t={t}
+          dark={isDark}
+          expanded={expanded}
           onAward={(amt) => setTypingXp((x) => x + amt)}
         />
       )}
@@ -1414,9 +1416,18 @@ export function AITutor({
   const panelWrap = launcherOpen ? (
     <div
       style={{
-        width: "min(400px, calc(100vw - 40px))",
-        height: "min(660px, calc(100vh - 108px))",
+        width: expanded
+          ? "min(80vw, calc(100vw - 40px))"
+          : view === "typing"
+          ? "min(760px, calc(100vw - 40px))"
+          : "min(400px, calc(100vw - 40px))",
+        height: expanded
+          ? "min(90vh, calc(100vh - 40px))"
+          : view === "typing"
+          ? "min(720px, calc(100vh - 108px))"
+          : "min(660px, calc(100vh - 108px))",
         animation: "ai-tutor-pop .26s cubic-bezier(.22,1,.36,1)",
+        transition: "width .32s cubic-bezier(.22,1,.36,1), height .32s cubic-bezier(.22,1,.36,1)",
       }}
     >
       {panel}
@@ -1452,6 +1463,267 @@ export function AITutor({
   );
 }
 
+// ── Finger-guide keyboard ────────────────────────────────────────────────────
+// Standard touch-typing finger assignments. Each finger has a pastel key tint,
+// a stronger "solid" tone for the active key + legend, a readable label ink, and
+// a short label shown under the home-row keys (A S D F J K L ;).
+type FingerId = "lp" | "lr" | "lm" | "li" | "ri" | "rm" | "rr" | "rp" | "thumb";
+
+const FINGERS: Record<
+  FingerId,
+  { hand: "Left" | "Right" | ""; name: string; short: string; pastel: string; solid: string; ink: string }
+> = {
+  lp: { hand: "Left", name: "Pinky", short: "pinky", pastel: "#F5C6C2", solid: "#E58C86", ink: "#8A362F" },
+  lr: { hand: "Left", name: "Ring", short: "ring", pastel: "#F7D8B6", solid: "#EBAE6E", ink: "#875321" },
+  lm: { hand: "Left", name: "Middle", short: "mid", pastel: "#F6ECAE", solid: "#E6CF54", ink: "#736312" },
+  li: { hand: "Left", name: "Index", short: "index", pastel: "#C7E7B3", solid: "#79C56C", ink: "#356329" },
+  ri: { hand: "Right", name: "Index", short: "index", pastel: "#C2D5F3", solid: "#7BA0E7", ink: "#2C4C8C" },
+  rm: { hand: "Right", name: "Middle", short: "mid", pastel: "#DBCBEF", solid: "#AE93D8", ink: "#533883" },
+  rr: { hand: "Right", name: "Ring", short: "ring", pastel: "#F5CADD", solid: "#E68FB8", ink: "#8A345F" },
+  rp: { hand: "Right", name: "Pinky", short: "pinky", pastel: "#C1EADF", solid: "#79CEBB", ink: "#216356" },
+  thumb: { hand: "", name: "Thumb", short: "thumb", pastel: "#E4E4E8", solid: "#C2C2C7", ink: "#6B6B70" },
+};
+
+type KeyDef = { code: string; label: string; finger: FingerId; flex?: number };
+
+// QWERTY layout. `code` is what we match the next character against (letters are
+// stored uppercase). Home-row keys carry a finger label under the letter.
+const HOME_KEYS = new Set(["A", "S", "D", "F", "J", "K", "L", ";"]);
+const KEYBOARD_ROWS: KeyDef[][] = [
+  [
+    { code: "`", label: "`", finger: "lp" }, { code: "1", label: "1", finger: "lp" },
+    { code: "2", label: "2", finger: "lr" }, { code: "3", label: "3", finger: "lm" },
+    { code: "4", label: "4", finger: "li" }, { code: "5", label: "5", finger: "li" },
+    { code: "6", label: "6", finger: "ri" }, { code: "7", label: "7", finger: "ri" },
+    { code: "8", label: "8", finger: "rm" }, { code: "9", label: "9", finger: "rr" },
+    { code: "0", label: "0", finger: "rp" }, { code: "-", label: "-", finger: "rp" },
+    { code: "=", label: "=", finger: "rp" },
+  ],
+  [
+    { code: "Q", label: "Q", finger: "lp" }, { code: "W", label: "W", finger: "lr" },
+    { code: "E", label: "E", finger: "lm" }, { code: "R", label: "R", finger: "li" },
+    { code: "T", label: "T", finger: "li" }, { code: "Y", label: "Y", finger: "ri" },
+    { code: "U", label: "U", finger: "ri" }, { code: "I", label: "I", finger: "rm" },
+    { code: "O", label: "O", finger: "rr" }, { code: "P", label: "P", finger: "rp" },
+    { code: "[", label: "[", finger: "rp" }, { code: "]", label: "]", finger: "rp" },
+    { code: "\\", label: "\\", finger: "rp" },
+  ],
+  [
+    { code: "A", label: "A", finger: "lp" }, { code: "S", label: "S", finger: "lr" },
+    { code: "D", label: "D", finger: "lm" }, { code: "F", label: "F", finger: "li" },
+    { code: "G", label: "G", finger: "li" }, { code: "H", label: "H", finger: "ri" },
+    { code: "J", label: "J", finger: "ri" }, { code: "K", label: "K", finger: "rm" },
+    { code: "L", label: "L", finger: "rr" }, { code: ";", label: ";", finger: "rp" },
+    { code: "'", label: "'", finger: "rp" },
+  ],
+  [
+    { code: "LSHIFT", label: "Shift", finger: "lp", flex: 1.9 },
+    { code: "Z", label: "Z", finger: "lp" }, { code: "X", label: "X", finger: "lr" },
+    { code: "C", label: "C", finger: "lm" }, { code: "V", label: "V", finger: "li" },
+    { code: "B", label: "B", finger: "li" }, { code: "N", label: "N", finger: "ri" },
+    { code: "M", label: "M", finger: "ri" }, { code: ",", label: ",", finger: "rm" },
+    { code: ".", label: ".", finger: "rr" }, { code: "/", label: "/", finger: "rp" },
+    { code: "RSHIFT", label: "Shift", finger: "rp", flex: 1.9 },
+  ],
+];
+
+// Shifted symbol → its base (unshifted) key, so we can highlight the right key
+// and show the "Shift + <base>" combo.
+const SHIFT_SYMBOL: Record<string, string> = {
+  "!": "1", "@": "2", "#": "3", $: "4", "%": "5", "^": "6", "&": "7", "*": "8",
+  "(": "9", ")": "0", _: "-", "+": "=", "{": "[", "}": "]", "|": "\\",
+  ":": ";", '"': "'", "<": ",", ">": ".", "?": "/", "~": "`",
+};
+
+// Resolve the next character into: the key to press, whether Shift is needed,
+// the pressing finger, and (if shifting) which Shift key to hold.
+function resolveKey(ch: string | undefined): {
+  key?: string;
+  base?: string;
+  finger?: FingerId;
+  needsShift: boolean;
+  shiftKey?: "LSHIFT" | "RSHIFT";
+  shiftFinger?: FingerId;
+} {
+  if (ch === undefined) return { needsShift: false };
+  if (ch === " ") return { key: "SPACE", base: " ", finger: "thumb", needsShift: false };
+
+  let key: string;
+  let needsShift = false;
+  if (/[A-Z]/.test(ch)) {
+    key = ch;
+    needsShift = true;
+  } else if (/[a-z]/.test(ch)) {
+    key = ch.toUpperCase();
+  } else if (SHIFT_SYMBOL[ch]) {
+    key = SHIFT_SYMBOL[ch];
+    needsShift = true;
+  } else {
+    key = ch; // already an unshifted key like . , ; ' - =
+  }
+
+  const finger = KEY_TO_FINGER[key];
+  if (!finger) return { needsShift };
+  // Touch-typing rule: shift with the hand opposite the pressing finger.
+  const shiftKey = needsShift ? (finger.startsWith("l") ? "RSHIFT" : "LSHIFT") : undefined;
+  const shiftFinger: FingerId | undefined = shiftKey === "LSHIFT" ? "lp" : shiftKey === "RSHIFT" ? "rp" : undefined;
+  return { key, base: key, finger, needsShift, shiftKey, shiftFinger };
+}
+
+const KEY_TO_FINGER: Record<string, FingerId> = KEYBOARD_ROWS.flat().reduce(
+  (m, k) => {
+    if (k.code !== "LSHIFT" && k.code !== "RSHIFT") m[k.code] = k.finger;
+    return m;
+  },
+  {} as Record<string, FingerId>,
+);
+
+function FingerKeyboard({
+  activeKey,
+  activeShift,
+  activeFinger,
+  shiftFinger,
+  dark,
+  expanded,
+}: {
+  activeKey?: string;
+  activeShift?: "LSHIFT" | "RSHIFT";
+  activeFinger?: FingerId;
+  shiftFinger?: FingerId;
+  dark: boolean;
+  expanded?: boolean;
+}) {
+  // Scale the whole board up when expanded so low-vision users can read it.
+  const kh = expanded ? 56 : 40; // key height
+  const kf = expanded ? 17 : 12; // key label font
+  const shortF = expanded ? 11 : 8; // home-row finger label
+  const maxW = expanded ? 880 : 620;
+  const spaceH = expanded ? 40 : 30;
+  const circle = expanded ? 48 : 34; // legend circle diameter
+  const circleF = expanded ? 11 : 8.5;
+
+  const spaceActive = activeKey === "SPACE";
+  const keyCell = (k: KeyDef) => {
+    const f = FINGERS[k.finger];
+    const isActive = k.code === activeKey || (k.code === activeShift);
+    const isHome = HOME_KEYS.has(k.code);
+    return (
+      <div
+        key={k.code}
+        style={{
+          flex: k.flex ?? 1,
+          minWidth: 0,
+          height: kh,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 8,
+          background: isActive ? f.solid : f.pastel,
+          color: isActive ? "#fff" : f.ink,
+          fontWeight: isActive ? 800 : 600,
+          fontSize: kf,
+          lineHeight: 1.1,
+          boxShadow: isActive
+            ? `0 0 0 2px ${f.solid}, 0 3px 8px ${f.solid}66`
+            : "inset 0 -1.5px 0 rgba(0,0,0,0.06)",
+          transform: isActive ? "translateY(-1px)" : "none",
+          transition: "background .12s, transform .12s, box-shadow .12s",
+          opacity: dark && !isActive ? 0.82 : 1,
+        }}
+      >
+        <span>{k.label}</span>
+        {isHome && (
+          <span style={{ fontSize: shortF, fontWeight: 700, opacity: isActive ? 0.95 : 0.75 }}>{f.short}</span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ overflowX: "auto" }}>
+      <div style={{ width: "100%", maxWidth: maxW, margin: "0 auto", display: "flex", flexDirection: "column", gap: 4, minWidth: 360 }}>
+        {KEYBOARD_ROWS.map((row, i) => (
+          <div key={i} style={{ display: "flex", gap: 4, paddingLeft: [0, 10, 16, 0][i] }}>
+            {row.map(keyCell)}
+          </div>
+        ))}
+        {/* Space bar */}
+        <div style={{ display: "flex", gap: 4, paddingLeft: 60, paddingRight: 60 }}>
+          <div
+            style={{
+              flex: 1,
+              height: spaceH,
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: expanded ? 14 : 11,
+              fontWeight: 700,
+              background: spaceActive ? FINGERS.thumb.solid : FINGERS.thumb.pastel,
+              color: spaceActive ? "#fff" : FINGERS.thumb.ink,
+              boxShadow: spaceActive
+                ? `0 0 0 2px ${FINGERS.thumb.solid}, 0 3px 8px ${FINGERS.thumb.solid}66`
+                : "inset 0 -1.5px 0 rgba(0,0,0,0.06)",
+              transition: "background .12s",
+            }}
+          >
+            Space
+          </div>
+        </div>
+      </div>
+      </div>
+
+      {/* Hand / finger legend */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 18, marginTop: 12, paddingTop: 6, flexWrap: "wrap" }}>
+        {(
+          [
+            { title: "LEFT HAND", ids: ["lp", "lr", "lm", "li"] as FingerId[] },
+            { title: "RIGHT HAND", ids: ["ri", "rm", "rr", "rp"] as FingerId[] },
+          ]
+        ).map((group) => (
+          <div key={group.title} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+            <div style={{ fontSize: expanded ? 11 : 9, fontWeight: 700, letterSpacing: "0.06em", color: FINGERS.thumb.ink }}>
+              {group.title}
+            </div>
+            <div style={{ display: "flex", gap: 5 }}>
+              {group.ids.map((id) => {
+                const f = FINGERS[id];
+                const on = id === activeFinger || id === shiftFinger;
+                return (
+                  <div
+                    key={id}
+                    title={`${f.hand} ${f.name}`}
+                    style={{
+                      width: circle,
+                      height: circle,
+                      borderRadius: "50%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: circleF,
+                      fontWeight: 700,
+                      textAlign: "center",
+                      background: on ? f.solid : f.pastel,
+                      color: on ? "#fff" : f.ink,
+                      boxShadow: on ? `0 0 0 3px ${f.solid}44` : "none",
+                      transform: on ? "scale(1.08)" : "none",
+                      transition: "transform .12s, background .12s",
+                    }}
+                  >
+                    {f.name}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Typing practice view ─────────────────────────────────────────────────────
 function TypingView({
   content,
@@ -1459,6 +1731,8 @@ function TypingView({
   primary,
   secondary,
   t,
+  dark,
+  expanded,
   onAward,
 }: {
   content: string;
@@ -1466,6 +1740,8 @@ function TypingView({
   primary: string;
   secondary: string;
   t: Tokens;
+  dark: boolean;
+  expanded: boolean;
   onAward: (amount: number) => void;
 }) {
   const lines = useMemo(() => drillLines(content), [content]);
@@ -1487,6 +1763,17 @@ function TypingView({
   const accuracy = typed.length ? Math.round((correctChars / typed.length) * 100) : 100;
   const minutes = startedAt ? Math.max((Date.now() - startedAt) / 60000, 0.0001) : 0;
   const wpm = startedAt ? Math.max(0, Math.round(correctChars / 5 / minutes)) : 0;
+
+  // Which key/finger to guide toward next.
+  const nextChar = !done ? target[typed.length] : undefined;
+  const guide = resolveKey(nextChar);
+  const guideFinger = guide.finger ? FINGERS[guide.finger] : undefined;
+  const shiftFinger = guide.shiftFinger ? FINGERS[guide.shiftFinger] : undefined;
+
+  // Expanded → scale everything up for low-vision readability.
+  const sz = expanded
+    ? { colMax: 900, sentence: 32, hint: 20, combo: 15, stat: 30, statLabel: 13, btn: 20, btnPad: 18, gap: 22 }
+    : { colMax: 680, sentence: 20, hint: 14, combo: 12, stat: 18, statLabel: 11, btn: 15, btnPad: 12, gap: 16 };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.slice(0, target.length);
@@ -1518,6 +1805,7 @@ function TypingView({
         flexDirection: "column",
       }}
     >
+      <div style={{ width: "100%", maxWidth: sz.colMax, margin: "0 auto", display: "flex", flexDirection: "column" }}>
       <div style={{ fontSize: 12, color: ink2, marginBottom: 4 }}>
         {moduleLabel} · term {idx + 1} of {lines.length}
       </div>
@@ -1527,7 +1815,7 @@ function TypingView({
       <div
         onClick={() => inputRef.current?.focus()}
         style={{
-          fontSize: 20,
+          fontSize: sz.sentence,
           lineHeight: 1.55,
           fontWeight: 600,
           letterSpacing: "0.01em",
@@ -1568,42 +1856,97 @@ function TypingView({
         })}
       </div>
 
+      {/* Capture keystrokes with a visually-hidden input — the sentence above
+          shows live progress, so no visible field is needed. Click the sentence
+          (or the keyboard area) to refocus. */}
       <input
         ref={inputRef}
         value={typed}
         onChange={onChange}
         disabled={done}
-        placeholder="Start typing…"
         autoCapitalize="off"
         autoCorrect="off"
         spellCheck={false}
+        aria-label="Type the sentence above"
         style={{
-          width: "100%",
-          boxSizing: "border-box",
-          border: `0.5px solid ${t.fill2}`,
-          borderRadius: 14,
-          padding: "12px 15px",
-          fontSize: 16,
-          fontFamily: FONT,
-          outline: "none",
-          background: done ? fill : t.surface,
-          color: ink,
-        }}
-        onFocus={(e) => {
-          e.currentTarget.style.borderColor = primary;
-          e.currentTarget.style.boxShadow = `0 0 0 3.5px ${primary}1f`;
-        }}
-        onBlur={(e) => {
-          e.currentTarget.style.borderColor = t.fill2;
-          e.currentTarget.style.boxShadow = "none";
+          position: "absolute",
+          width: 1,
+          height: 1,
+          opacity: 0,
+          padding: 0,
+          border: "none",
+          pointerEvents: "none",
         }}
       />
 
+      {/* Finger guide */}
+      <div style={{ marginTop: 18, cursor: "text" }} onClick={() => inputRef.current?.focus()}>
+        <div style={{ textAlign: "center", fontSize: sz.hint, color: ink2, marginBottom: 10 }}>
+          {done ? (
+            <span>Line complete 🎉</span>
+          ) : guide.needsShift && guideFinger && shiftFinger ? (
+            <span>
+              Hold <strong style={{ color: shiftFinger.solid }}>{shiftFinger.hand} Shift</strong> + use your{" "}
+              <strong style={{ color: guideFinger.solid }}>
+                {guideFinger.hand} {guideFinger.name}
+              </strong>
+            </span>
+          ) : guideFinger ? (
+            <span>
+              Use your{" "}
+              <strong style={{ color: guideFinger.solid }}>
+                {guide.key === "SPACE" ? "Thumb" : `${guideFinger.hand} ${guideFinger.name}`}
+              </strong>
+            </span>
+          ) : (
+            <span>&nbsp;</span>
+          )}
+        </div>
+
+        {/* Shift combo pill — how to produce a capital or symbol */}
+        {guide.needsShift && guide.base && (
+          <div style={{ textAlign: "center", marginBottom: 10 }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: sz.combo,
+                fontWeight: 600,
+                color: ink,
+                background: fill,
+                borderRadius: 999,
+                padding: "5px 12px",
+              }}
+            >
+              <kbd style={kbdStyle(t)}>Shift</kbd>
+              <span style={{ opacity: 0.6 }}>+</span>
+              <kbd style={kbdStyle(t)}>{guide.base}</kbd>
+              {nextChar && nextChar !== guide.base && (
+                <>
+                  <span style={{ opacity: 0.6 }}>→</span>
+                  <span style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{nextChar}</span>
+                </>
+              )}
+            </span>
+          </div>
+        )}
+
+        <FingerKeyboard
+          activeKey={guide.key}
+          activeShift={guide.shiftKey}
+          activeFinger={guide.finger}
+          shiftFinger={guide.shiftFinger}
+          dark={dark}
+          expanded={expanded}
+        />
+      </div>
+
       {/* Stats */}
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <TypingStat value={String(wpm)} label="WPM" t={t} />
-        <TypingStat value={`${accuracy}%`} label="Accuracy" t={t} />
-        <TypingStat value={`${typed.length}/${target.length}`} label="Chars" t={t} />
+      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+        <TypingStat value={String(wpm)} label="WPM" t={t} big={expanded} />
+        <TypingStat value={`${accuracy}%`} label="Accuracy" t={t} big={expanded} />
+        <TypingStat value={`${typed.length}/${target.length}`} label="Chars" t={t} big={expanded} />
       </div>
 
       {done && (
@@ -1636,9 +1979,9 @@ function TypingView({
             border: "none",
             cursor: "pointer",
             borderRadius: 13,
-            padding: "12px",
+            padding: sz.btnPad,
             fontFamily: FONT,
-            fontSize: 15,
+            fontSize: sz.btn,
             fontWeight: 600,
             color: primary,
             background: fill,
@@ -1654,9 +1997,9 @@ function TypingView({
             border: "none",
             cursor: "pointer",
             borderRadius: 13,
-            padding: "12px",
+            padding: sz.btnPad,
             fontFamily: FONT,
-            fontSize: 15,
+            fontSize: sz.btn,
             fontWeight: 600,
             color: "#fff",
             background: primary,
@@ -1665,15 +2008,30 @@ function TypingView({
           Next term
         </button>
       </div>
+      </div>
     </div>
   );
 }
 
-function TypingStat({ value, label, t }: { value: string; label: string; t: Tokens }) {
+function kbdStyle(t: Tokens): React.CSSProperties {
+  return {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: 11,
+    fontWeight: 700,
+    color: t.ink,
+    background: t.surface,
+    border: `0.5px solid ${t.fill2}`,
+    borderRadius: 5,
+    padding: "1px 6px",
+    boxShadow: "0 1px 0 rgba(0,0,0,0.08)",
+  };
+}
+
+function TypingStat({ value, label, t, big }: { value: string; label: string; t: Tokens; big?: boolean }) {
   return (
-    <div style={{ flex: 1, background: t.fill, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-      <div style={{ fontSize: 18, fontWeight: 700, color: t.ink, letterSpacing: "-0.02em" }}>{value}</div>
-      <div style={{ fontSize: 11, color: t.ink2, marginTop: 1 }}>{label}</div>
+    <div style={{ flex: 1, background: t.fill, borderRadius: 12, padding: big ? "16px 10px" : "10px 8px", textAlign: "center" }}>
+      <div style={{ fontSize: big ? 28 : 18, fontWeight: 700, color: t.ink, letterSpacing: "-0.02em" }}>{value}</div>
+      <div style={{ fontSize: big ? 13 : 11, color: t.ink2, marginTop: 1 }}>{label}</div>
     </div>
   );
 }
