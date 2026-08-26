@@ -15,7 +15,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/firme-coding/thepplbot"
+    "url": "git+https://github.com/firme-coding/thepplbot.git"
   },
   "homepage": "https://github.com/firme-coding/thepplbot#readme",
   "type": "module",
