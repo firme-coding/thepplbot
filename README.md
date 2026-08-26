@@ -17,7 +17,7 @@ The bundled demo content is a live tour of [Firme Coding](https://firmecoding.or
   - **Chat** — Socratic tutor grounded in your curriculum.
   - **Typing** — a typing drill built from the module's own key terms, scored on WPM + accuracy.
   - **Progress** — level ring, XP, module mastery, and badges.
-- **Learning modalities** — reading · visual · audio · images · hands-on. Picking one tailors how the tutor explains. Audio is spoken via the browser; for real photos in *images* mode, see the [Unsplash recipe](./CUSTOMIZATION.md#real-images-unsplash).
+- **Learning modalities** — reading · visual · audio · images · hands-on. Picking one tailors how the tutor explains. The **Listen** button reads answers aloud; install the optional neural voice for a natural read on every OS (see [Audio voice](#audio-voice)). For real photos in *images* mode, see the [Unsplash recipe](./CUSTOMIZATION.md#real-images-unsplash).
 - **Gamification** — earn XP from questions and typing, level up, master modules, unlock badges. Progress persists in `localStorage`.
 - **Light / dark / auto theme** — `theme` recolors the chrome to match your app; `auto` follows the visitor's OS setting. Your brand accents stay put. See [Dark mode](#dark-mode).
 - **Custom launcher icon** — swap the floating bubble's glyph for your own image, emoji, or React node via `launcherIcon`. See [Custom launcher icon](#custom-launcher-icon).
@@ -35,6 +35,24 @@ yarn add thepplbot
 ```
 
 React 18+ is required as a peer dependency.
+
+---
+
+## Audio voice
+
+The **Listen** button (and the *audio* modality) reads tutor answers aloud. Two engines, picked automatically:
+
+- **Neural voice (recommended)** — [Kokoro-82M](https://github.com/hexgrad/kokoro), an open (Apache-2.0) text-to-speech model that runs entirely in the browser via WebGPU (falling back to WASM). No API key, no server, and the same natural voice for every visitor regardless of OS. It's an **optional dependency**, so install it to enable it:
+
+  ```bash
+  npm install kokoro-js
+  ```
+
+  The ~80 MB model downloads on the first click and is cached afterward; the button shows **Loading…** while it downloads.
+
+- **Browser fallback** — if `kokoro-js` isn't installed (or can't run), the widget uses the browser's built-in Web Speech voices. Zero download, but quality depends on the visitor's OS.
+
+Nothing to configure — the widget uses the neural voice when it's available and falls back otherwise. To change which neural voice is used, set `KOKORO_VOICE` in `src/lib/speech.ts` to any name from Kokoro's voice list (e.g. `af_heart`, `am_michael`, `bf_emma`, `bm_george`).
 
 ---
 

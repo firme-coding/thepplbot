@@ -23,8 +23,10 @@ export default defineConfig({
       fileName: (format, entryName) => `${entryName}.${format === "es" ? "js" : "cjs"}`,
     },
     rollupOptions: {
-      // React is a peer dep — don't bundle it
-      external: ["react", "react-dom", "react/jsx-runtime"],
+      // React is a peer dep — don't bundle it. kokoro-js is an optional runtime
+      // dependency (the neural voice); keep it external so it's lazy-loaded on
+      // demand and never bloats the base bundle.
+      external: ["react", "react-dom", "react/jsx-runtime", "kokoro-js"],
     },
     // Keep CSS in the JS bundle so consumers don't need a separate import
     cssCodeSplit: false,

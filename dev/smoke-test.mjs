@@ -100,6 +100,23 @@ await act(async () => {
 check("Progress view shows LEVEL ring", container.textContent.includes("LEVEL"));
 check("Progress view counts 1 question", container.textContent.includes("Questions"));
 
+// 3b. Topic gating — later modules locked behind a checkpoint
+check("later topics show a locked checkpoint hint", container.textContent.includes("checkpoint to unlock"));
+check("progress view offers the unlock-next checkpoint CTA", container.textContent.includes("Checkpoint: unlock"));
+await act(async () => {
+  [...container.querySelectorAll("button")]
+    .find((b) => b.textContent.includes("Checkpoint: unlock"))
+    .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+});
+check("checkpoint modal opens with type step", container.textContent.includes("Type the question exactly"));
+check("checkpoint modal has a type-along input", !!container.querySelector('input[aria-label="Type the question above"]'));
+// close it so it doesn't interfere with later checks
+await act(async () => {
+  [...container.querySelectorAll("button")]
+    .find((b) => b.textContent.trim() === "Close")
+    .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+});
+
 // 4. Switch to Typing tab — feature exists and pulls drill text
 await act(async () => {
   [...container.querySelectorAll("button")]
@@ -112,6 +129,16 @@ check(
   !!container.querySelector('input[aria-label="Type the sentence above"]'),
 );
 check("Typing view renders the finger keyboard", container.textContent.includes("LEFT HAND"));
+
+// 4b. Typing ladder — six stages, later ones locked until earlier ones clear
+check("Typing ladder shows all six stages", ["Keys", "Words", "Two words", "Sentence", "Speed", "Race"].every((s) => container.textContent.includes(s)));
+check("Typing ladder starts on the Keys stage", container.textContent.includes("find the home row"));
+check(
+  "Typing ladder locks later stages (🔒 present)",
+  container.textContent.includes("🔒"),
+);
+const raceBtn = [...container.querySelectorAll("button")].find((b) => b.textContent.trim() === "Race" || b.textContent.trim() === "🔒Race");
+check("locked Race stage button is disabled", !!raceBtn && raceBtn.disabled === true);
 
 // 5. Floating launcher mode (position prop)
 const fContainer = document.createElement("div");

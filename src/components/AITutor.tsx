@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
-import type { ChatMessage, AITutorProps, Modality, Curriculum } from "../types";
+import type { ChatMessage, AITutorProps, Modality, Curriculum, CheckpointQuiz, CurriculumModule } from "../types";
 import { DEMO_CURRICULUM } from "../curriculum";
 
 // Stable empty reference so the loading-state fallback doesn't churn identity.
@@ -100,16 +100,6 @@ const MODALITIES: { key: Modality; label: string; hint: string }[] = [
     key: "reading",
     label: "Reading",
     hint: "Present ideas as clear, concise written explanations the learner can read.",
-  },
-  {
-    key: "visual",
-    label: "Visual",
-    hint: "Describe concepts visually — spatial layouts, what things look like, diagrams in words.",
-  },
-  {
-    key: "audio",
-    label: "Audio",
-    hint: "Explain as if narrating aloud — conversational and rhythmic, like an audio lesson.",
   },
   {
     key: "images",
@@ -330,6 +320,74 @@ function loadNumber(key: string): number {
   }
 }
 
+// ── Typing ladder progress (localStorage) ────────────────────────────────────
+// Which stages are unlocked and which drills within each are cleared. Kept
+// separate from question XP so the two never stomp each other.
+type TypingProg = { unlocked: number; cleared: Record<string, number[]> };
+
+function typingProgKey(id: string) {
+  return `ai-tutor:typing:stages:${id}`;
+}
+function bestWpmKeyFor(id: string) {
+  return `ai-tutor:typing:bestwpm:${id}`;
+}
+function loadTypingProg(id: string): TypingProg {
+  if (typeof window === "undefined") return { unlocked: 0, cleared: {} };
+  try {
+    const raw = window.localStorage.getItem(typingProgKey(id));
+    if (!raw) return { unlocked: 0, cleared: {} };
+    const p = JSON.parse(raw);
+    return { unlocked: Number(p.unlocked) || 0, cleared: p.cleared ?? {} };
+  } catch {
+    return { unlocked: 0, cleared: {} };
+  }
+}
+function saveTypingProg(id: string, p: TypingProg) {
+  try {
+    window.localStorage.setItem(typingProgKey(id), JSON.stringify(p));
+  } catch {
+    /* storage may be unavailable — practice still works in-session */
+  }
+}
+
+// ── Checkpoint gating (localStorage) ─────────────────────────────────────────
+// Module keys whose checkpoint the learner has passed. Passing module N's
+// checkpoint unlocks module N+1. Kept local (not in TutorProgress) so the
+// host's controlled-progress contract is untouched.
+function checkpointsKey(id: string) {
+  return `ai-tutor:checkpoints:${id}`;
+}
+function loadCheckpoints(id: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(checkpointsKey(id));
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveCheckpoints(id: string, keys: string[]) {
+  try {
+    window.localStorage.setItem(checkpointsKey(id), JSON.stringify(keys));
+  } catch {
+    /* storage may be unavailable */
+  }
+}
+
+// The checkpoint quiz for a module: the author-supplied one, or a simple
+// generated fallback (type the prompt, then pick which topic you're on) so
+// gating works even when no quiz was authored.
+function resolveCheckpoint(mod: CurriculumModule, allLabels: string[]): CheckpointQuiz {
+  if (mod.checkpoint && mod.checkpoint.options.length >= 2) return mod.checkpoint;
+  const distractors = allLabels.filter((l) => l !== mod.label).slice(0, 3);
+  const options = [mod.label, ...distractors];
+  // Rotate so the answer isn't always first, deterministically (no re-shuffle
+  // on every render).
+  const shift = mod.label.length % options.length;
+  for (let i = 0; i < shift; i++) options.push(options.shift() as string);
+  return { question: "What topic are you studying right now?", options, answer: options.indexOf(mod.label) };
+}
+
 // Pull short, typeable drill lines (key terms + a couple of overview sentences)
 // straight from the module content, so typing practice tracks the curriculum.
 function drillLines(content: string): string[] {
@@ -377,6 +435,7 @@ export function AITutor({
   defaultModality = "reading",
   position,
   launcherIcon,
+  chatIcon,
   user,
   initialProgress,
   onProgressChange,
@@ -405,8 +464,15 @@ export function AITutor({
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"chat" | "typing" | "progress">("chat");
   const [modality, setModality] = useState<Modality>(defaultModality);
+  // Which assistant message is currently being read aloud (null = none).
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  // Which message is preparing to read — covers the neural voice's first-use
+  // model download so the button can show a loading state instead of silence.
+  const [loadingSpeechId, setLoadingSpeechId] = useState<string | null>(null);
   const [showModules, setShowModules] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Module key whose checkpoint modal is open (null = closed).
+  const [checkpointFor, setCheckpointFor] = useState<string | null>(null);
 
   // Progress: host-controlled (persisted in your backend) when onProgressChange
   // is provided, otherwise cached in localStorage keyed by userId (or orgName).
@@ -420,6 +486,8 @@ export function AITutor({
   const [typingXp, setTypingXp] = useState<number>(() =>
     controlled ? initialProgress?.typingXp ?? 0 : loadNumber(typingKey),
   );
+  // Module keys whose checkpoint has been passed — gates the next topic.
+  const [passedCheckpoints, setPassedCheckpoints] = useState<string[]>(() => loadCheckpoints(progressId));
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -528,7 +596,9 @@ export function AITutor({
   }, [messages, isLoading]);
 
   const activeModule = activeCurriculum[selectedKey];
-  const activeModality = MODALITIES.find((m) => m.key === modality)!;
+  // Fall back to the first modality if `modality` no longer exists (e.g. a stale
+  // defaultModality="visual" after that option was removed) so we never crash.
+  const activeModality = MODALITIES.find((m) => m.key === modality) ?? MODALITIES[0];
 
   const resolvedSystemPrompt =
     (systemPrompt ?? DEFAULT_SYSTEM(orgName, activeModule?.content ?? "")) +
@@ -543,6 +613,32 @@ export function AITutor({
   const level = Math.floor(xp / XP_PER_LEVEL) + 1;
   const xpIntoLevel = xp % XP_PER_LEVEL;
   const levelPct = xpIntoLevel / XP_PER_LEVEL;
+
+  // ── Topic gating ───────────────────────────────────────────────────────────
+  // Topic 1 is always open; each later topic unlocks when the previous one's
+  // checkpoint is passed.
+  const passedSet = useMemo(() => new Set(passedCheckpoints), [passedCheckpoints]);
+  const isUnlocked = useCallback(
+    (i: number) => i === 0 || passedSet.has(moduleKeys[i - 1]),
+    [passedSet, moduleKeys],
+  );
+  // The frontier: the highest-unlocked topic that still has a locked topic after
+  // it — i.e. the checkpoint the learner should take next (null if all open).
+  const firstLockedIdx = moduleKeys.findIndex((_, i) => !isUnlocked(i));
+  const frontierKey = firstLockedIdx > 0 ? moduleKeys[firstLockedIdx - 1] : null;
+  const allLabels = useMemo(() => moduleKeys.map((k) => activeCurriculum[k]?.label ?? k), [moduleKeys, activeCurriculum]);
+
+  const passCheckpoint = useCallback(
+    (key: string) => {
+      setPassedCheckpoints((prev) => {
+        if (prev.includes(key)) return prev;
+        const next = [...prev, key];
+        saveCheckpoints(progressId, next);
+        return next;
+      });
+    },
+    [progressId],
+  );
 
   const submit = useCallback(async () => {
     const text = input.trim();
@@ -570,7 +666,6 @@ export function AITutor({
         ...prev,
         { role: "assistant", content: reply, id: generateId() },
       ]);
-      if (modality === "audio") speak(reply); // read it aloud in audio mode
       // Hand the completed turn to the host to persist (fire-and-forget).
       if (onTranscript) {
         try {
@@ -937,7 +1032,14 @@ export function AITutor({
                     justifyContent: "center",
                   }}
                 >
-                  <Glyph k="eye" size={26} color={primaryColor} stroke={1.8} />
+                  {(() => {
+                    const icon = chatIcon ?? logoUrl;
+                    return icon != null && icon !== false ? (
+                      renderLauncherIcon(icon)
+                    ) : (
+                      <Glyph k="chat" size={26} color={primaryColor} stroke={1.8} />
+                    );
+                  })()}
                 </div>
                 <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: ink }}>
                   Ask your first question below.
@@ -980,31 +1082,56 @@ export function AITutor({
                   >
                     {isUser ? msg.content : <Markdown text={msg.content} accent={primaryColor} />}
                   </div>
-                  {!isUser && speechSupported() && (
-                    <button
-                      className="ai-tutor-tap"
-                      onClick={() => speak(msg.content)}
-                      aria-label="Read aloud"
-                      title="Read aloud"
-                      style={{
-                        marginTop: 3,
-                        marginLeft: 4,
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        color: ink2,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 11,
-                        fontFamily: FONT,
-                        padding: "2px 4px",
-                      }}
-                    >
-                      <Glyph k="speaker" size={13} color={ink2} stroke={2} />
-                      Listen
-                    </button>
-                  )}
+                  {!isUser && speechSupported() && (() => {
+                    const speaking = speakingId === msg.id;
+                    const loading = loadingSpeechId === msg.id;
+                    const active = speaking || loading;
+                    return (
+                      <button
+                        className="ai-tutor-tap"
+                        onClick={() => {
+                          if (active) {
+                            stopSpeaking();
+                            setSpeakingId(null);
+                            setLoadingSpeechId(null);
+                          } else {
+                            setLoadingSpeechId(msg.id);
+                            speak(msg.content, {
+                              onStart: () => {
+                                setLoadingSpeechId((c) => (c === msg.id ? null : c));
+                                setSpeakingId(msg.id);
+                              },
+                              onEnd: () => {
+                                setSpeakingId((c) => (c === msg.id ? null : c));
+                                setLoadingSpeechId((c) => (c === msg.id ? null : c));
+                              },
+                            });
+                          }
+                        }}
+                        aria-label={loading ? "Preparing audio" : speaking ? "Stop reading" : "Read aloud"}
+                        title={loading ? "Preparing audio" : speaking ? "Stop reading" : "Read aloud"}
+                        style={{
+                          marginTop: 4,
+                          marginLeft: 4,
+                          border: "none",
+                          background: active ? tint(primaryColor, "16") : t.fill,
+                          cursor: "pointer",
+                          color: active ? primaryColor : ink2,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          fontFamily: FONT,
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                        }}
+                      >
+                        <Glyph k={active ? "close" : "speaker"} size={13} color={active ? primaryColor : ink2} stroke={2} />
+                        {loading ? "Loading…" : speaking ? "Stop" : "Listen"}
+                      </button>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -1135,6 +1262,7 @@ export function AITutor({
           t={t}
           dark={isDark}
           expanded={expanded}
+          progressId={progressId}
           onAward={(amt) => setTypingXp((x) => x + amt)}
         />
       )}
@@ -1167,6 +1295,39 @@ export function AITutor({
             <StatChip value={String(visitedKeys.length)} label="Explored" emoji="🧭" t={t} />
           </div>
 
+          {/* Unlock-next checkpoint CTA */}
+          {frontierKey && (
+            <button
+              className="ai-tutor-tap"
+              onClick={() => setCheckpointFor(frontierKey)}
+              style={{
+                width: "100%",
+                border: "none",
+                cursor: "pointer",
+                borderRadius: 14,
+                padding: "14px 16px",
+                marginBottom: 18,
+                fontFamily: FONT,
+                fontSize: 14.5,
+                fontWeight: 600,
+                color: "#fff",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background: `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})`,
+                boxShadow: `0 8px 20px ${primaryColor}33`,
+              }}
+            >
+              <span style={{ fontSize: 20 }}>🔓</span>
+              <span style={{ flex: 1 }}>
+                Checkpoint: unlock{" "}
+                {activeCurriculum[moduleKeys[firstLockedIdx]]?.label ?? "the next topic"}
+              </span>
+              <Glyph k="chevron" size={16} color="#fff" />
+            </button>
+          )}
+
           {/* Module progress list */}
           <SectionLabel text="Modules" ink2={ink2} />
           <div style={{ background: t.surface, borderRadius: 14, overflow: "hidden", marginBottom: 22 }}>
@@ -1174,11 +1335,18 @@ export function AITutor({
               const c = counts[k] ?? 0;
               const mastered = c >= MASTERY_THRESHOLD;
               const pct = Math.min(c / MASTERY_THRESHOLD, 1);
+              const locked = !isUnlocked(i);
+              const prereqLabel = i > 0 ? activeCurriculum[moduleKeys[i - 1]]?.label : "";
               return (
                 <button
                   key={k}
                   className="ai-tutor-tap"
                   onClick={() => {
+                    if (locked) {
+                      // Tapping a locked topic opens the checkpoint that unlocks it.
+                      if (frontierKey) setCheckpointFor(frontierKey);
+                      return;
+                    }
                     setSelectedKey(k);
                     setView("chat");
                   }}
@@ -1193,6 +1361,7 @@ export function AITutor({
                     padding: "12px 14px",
                     borderTop: i === 0 ? "none" : `0.5px solid ${sep}`,
                     textAlign: "left",
+                    opacity: locked ? 0.55 : 1,
                   }}
                 >
                   <div
@@ -1204,10 +1373,12 @@ export function AITutor({
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      background: mastered ? primaryColor : fill,
+                      background: locked ? fill : mastered ? primaryColor : fill,
                     }}
                   >
-                    {mastered ? (
+                    {locked ? (
+                      <span style={{ fontSize: 13 }}>🔒</span>
+                    ) : mastered ? (
                       <Glyph k="check" size={15} color="#fff" stroke={2.6} />
                     ) : (
                       <span style={{ fontSize: 12, fontWeight: 700, color: ink2 }}>{i + 1}</span>
@@ -1226,17 +1397,24 @@ export function AITutor({
                     >
                       {activeCurriculum[k].label}
                     </div>
-                    <div style={{ height: 5, borderRadius: 3, background: fill, marginTop: 6, overflow: "hidden" }}>
-                      <div
-                        style={{
-                          width: `${pct * 100}%`,
-                          height: "100%",
-                          borderRadius: 3,
-                          background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})`,
-                          transition: "width .4s ease",
-                        }}
-                      />
-                    </div>
+                    {locked && (
+                      <div style={{ fontSize: 12, color: ink2, marginTop: 3 }}>
+                        🔒 Pass {prereqLabel}'s checkpoint to unlock
+                      </div>
+                    )}
+                    {!locked && (
+                      <div style={{ height: 5, borderRadius: 3, background: fill, marginTop: 6, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            width: `${pct * 100}%`,
+                            height: "100%",
+                            borderRadius: 3,
+                            background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})`,
+                            transition: "width .4s ease",
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                   <Glyph k="chevron" size={16} color={t.ink3} />
                 </button>
@@ -1333,11 +1511,17 @@ export function AITutor({
                 {moduleKeys.map((k, i) => {
                   const selected = k === selectedKey;
                   const mastered = (counts[k] ?? 0) >= MASTERY_THRESHOLD;
+                  const locked = !isUnlocked(i);
                   return (
                     <button
                       key={k}
                       className="ai-tutor-tap"
                       onClick={() => {
+                        if (locked) {
+                          setShowModules(false);
+                          if (frontierKey) setCheckpointFor(frontierKey);
+                          return;
+                        }
                         setSelectedKey(k);
                         setShowModules(false);
                         setView("chat");
@@ -1353,8 +1537,10 @@ export function AITutor({
                         padding: "13px 14px",
                         borderTop: i === 0 ? "none" : `0.5px solid ${sep}`,
                         textAlign: "left",
+                        opacity: locked ? 0.5 : 1,
                       }}
                     >
+                      {locked && <span style={{ fontSize: 14 }}>🔒</span>}
                       <span
                         style={{
                           flex: 1,
@@ -1366,7 +1552,7 @@ export function AITutor({
                         {activeCurriculum[k].label}
                       </span>
                       {mastered && <span style={{ fontSize: 14 }}>🏆</span>}
-                      {selected && <Glyph k="check" size={18} color={primaryColor} stroke={2.4} />}
+                      {selected && !locked && <Glyph k="check" size={18} color={primaryColor} stroke={2.4} />}
                     </button>
                   );
                 })}
@@ -1374,6 +1560,35 @@ export function AITutor({
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Checkpoint modal — gate to unlock the next topic ── */}
+      {checkpointFor && activeCurriculum[checkpointFor] && (
+        <CheckpointModal
+          quiz={resolveCheckpoint(activeCurriculum[checkpointFor], allLabels)}
+          moduleLabel={activeCurriculum[checkpointFor].label}
+          nextLabel={
+            (() => {
+              const ci = moduleKeys.indexOf(checkpointFor);
+              return ci >= 0 && ci + 1 < moduleKeys.length ? activeCurriculum[moduleKeys[ci + 1]]?.label ?? "" : "";
+            })()
+          }
+          primary={primaryColor}
+          secondary={secondaryColor}
+          t={t}
+          expanded={expanded}
+          onClose={() => setCheckpointFor(null)}
+          onPass={() => passCheckpoint(checkpointFor)}
+          onContinue={() => {
+            const ci = moduleKeys.indexOf(checkpointFor);
+            const nextKey = ci >= 0 && ci + 1 < moduleKeys.length ? moduleKeys[ci + 1] : null;
+            setCheckpointFor(null);
+            if (nextKey) {
+              setSelectedKey(nextKey);
+              setView("chat");
+            }
+          }}
+        />
       )}
     </div>
   );
@@ -1460,6 +1675,236 @@ export function AITutor({
         </>
       )}
     </div>
+  );
+}
+
+// ── Checkpoint modal ─────────────────────────────────────────────────────────
+// A two-step gate: retype the question (typing-along), then pick the correct
+// multiple-choice answer. Passing it unlocks the next topic.
+function CheckpointModal({
+  quiz,
+  moduleLabel,
+  nextLabel,
+  primary,
+  secondary,
+  t,
+  expanded,
+  onClose,
+  onPass,
+  onContinue,
+}: {
+  quiz: CheckpointQuiz;
+  moduleLabel: string;
+  nextLabel: string;
+  primary: string;
+  secondary: string;
+  t: Tokens;
+  expanded: boolean;
+  onClose: () => void;
+  onPass: () => void;
+  onContinue: () => void;
+}) {
+  const { ink, ink2, fill, sep } = t;
+  const [step, setStep] = useState<"type" | "quiz" | "done">("type");
+  const [typed, setTyped] = useState("");
+  const [picked, setPicked] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const target = quiz.question;
+  const typedOk = typed.length >= target.length && Array.from(target).every((ch, i) => typed[i] === ch);
+
+  useEffect(() => {
+    if (step === "type") setTimeout(() => inputRef.current?.focus(), 60);
+  }, [step]);
+
+  const sz = expanded ? { q: 24, opt: 17 } : { q: 18, opt: 15 };
+
+  const pick = (i: number) => {
+    setPicked(i);
+    if (i === quiz.answer) {
+      onPass();
+      setTimeout(() => setStep("done"), 450);
+    }
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)", zIndex: 10, animation: "ai-tutor-fade .2s ease" }} />
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          maxHeight: "88%",
+          background: t.groupBg,
+          borderTopLeftRadius: 22,
+          borderTopRightRadius: 22,
+          zIndex: 11,
+          display: "flex",
+          flexDirection: "column",
+          animation: "ai-tutor-sheet-up .34s cubic-bezier(.22,1,.36,1)",
+          boxShadow: "0 -8px 30px rgba(0,0,0,0.2)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 4px" }}>
+          <div style={{ width: 36, height: 5, borderRadius: 3, background: t.fill2 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 16px 6px" }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: ink }}>Checkpoint</div>
+            <div style={{ fontSize: 12.5, color: ink2 }}>
+              {nextLabel ? `Pass to unlock ${nextLabel}` : `Finish ${moduleLabel}`}
+            </div>
+          </div>
+          <button
+            className="ai-tutor-tap"
+            onClick={onClose}
+            aria-label="Close checkpoint"
+            style={{ border: "none", background: "transparent", cursor: "pointer", color: primary, fontSize: 16, fontWeight: 600, fontFamily: FONT }}
+          >
+            Close
+          </button>
+        </div>
+
+        {/* Step indicator */}
+        <div style={{ display: "flex", gap: 6, padding: "2px 16px 12px" }}>
+          {["type", "quiz", "done"].map((s, i) => {
+            const active = ["type", "quiz", "done"].indexOf(step) >= i;
+            return <div key={s} style={{ flex: 1, height: 4, borderRadius: 2, background: active ? primary : fill }} />;
+          })}
+        </div>
+
+        <div className="ai-tutor-scroll" style={{ overflowY: "auto", padding: "0 18px 22px" }}>
+          {step === "type" && (
+            <div onClick={() => inputRef.current?.focus()} style={{ cursor: "text" }}>
+              <div style={{ fontSize: 12.5, color: ink2, marginBottom: 10 }}>Type the question exactly to continue.</div>
+              <div style={{ fontSize: sz.q, lineHeight: 1.5, fontWeight: 600, whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 18 }}>
+                {Array.from(target).map((ch, i) => {
+                  const state = i < typed.length ? (typed[i] === ch ? "ok" : "bad") : i === typed.length ? "cur" : "todo";
+                  return (
+                    <span
+                      key={i}
+                      style={{
+                        color: state === "bad" ? "#FF3B30" : state === "todo" ? t.ink3 : ink,
+                        background: state === "bad" ? "rgba(255,59,48,0.14)" : state === "cur" ? `${primary}22` : "transparent",
+                        borderRadius: 3,
+                        boxShadow: state === "cur" ? `inset 0 -2px 0 ${primary}` : "none",
+                      }}
+                    >
+                      {ch}
+                    </span>
+                  );
+                })}
+              </div>
+              <input
+                ref={inputRef}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value.slice(0, target.length))}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Type the question above"
+                style={{ position: "absolute", width: 1, height: 1, opacity: 0, padding: 0, border: "none", pointerEvents: "none" }}
+              />
+              <button
+                className="ai-tutor-tap"
+                disabled={!typedOk}
+                onClick={() => setStep("quiz")}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  cursor: typedOk ? "pointer" : "default",
+                  borderRadius: 13,
+                  padding: 14,
+                  fontFamily: FONT,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: typedOk ? primary : t.fill2,
+                  transition: "background .2s",
+                }}
+              >
+                {typedOk ? "Next — answer it →" : "Type the question to continue"}
+              </button>
+            </div>
+          )}
+
+          {step === "quiz" && (
+            <div>
+              <div style={{ fontSize: sz.q, fontWeight: 700, color: ink, marginBottom: 14 }}>{quiz.question}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {quiz.options.map((opt, i) => {
+                  const isPicked = picked === i;
+                  const isCorrect = i === quiz.answer;
+                  const showWrong = isPicked && !isCorrect;
+                  const showRight = isPicked && isCorrect;
+                  return (
+                    <button
+                      key={i}
+                      className="ai-tutor-tap"
+                      onClick={() => pick(i)}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        borderRadius: 13,
+                        padding: "13px 15px",
+                        fontFamily: FONT,
+                        fontSize: sz.opt,
+                        fontWeight: 500,
+                        color: showWrong ? "#FF3B30" : showRight ? "#1a7f37" : ink,
+                        background: showRight ? "rgba(52,199,89,0.16)" : showWrong ? "rgba(255,59,48,0.12)" : t.surface,
+                        border: `1.5px solid ${showRight ? "#34C759" : showWrong ? "#FF3B30" : sep}`,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, fontWeight: 700, color: ink2 }}>{String.fromCharCode(65 + i)}</span>
+                      <span style={{ flex: 1 }}>{opt}</span>
+                      {showRight && <span>✓</span>}
+                      {showWrong && <span>✕</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {picked !== null && picked !== quiz.answer && (
+                <div style={{ fontSize: 13, color: ink2, marginTop: 12, textAlign: "center" }}>Not quite — try again.</div>
+              )}
+            </div>
+          )}
+
+          {step === "done" && (
+            <div style={{ textAlign: "center", padding: "18px 0 8px" }}>
+              <div style={{ fontSize: 44, marginBottom: 8 }}>🎉</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: ink, marginBottom: 4 }}>Checkpoint cleared!</div>
+              <div style={{ fontSize: 14, color: ink2, marginBottom: 20 }}>
+                {nextLabel ? `${nextLabel} is now unlocked.` : "Great work."}
+              </div>
+              <button
+                className="ai-tutor-tap"
+                onClick={onContinue}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  cursor: "pointer",
+                  borderRadius: 13,
+                  padding: 15,
+                  fontFamily: FONT,
+                  fontSize: 15.5,
+                  fontWeight: 700,
+                  color: "#fff",
+                  background: `linear-gradient(135deg, ${primary}, ${secondary})`,
+                }}
+              >
+                {nextLabel ? `Continue to ${nextLabel} →` : "Done"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1724,6 +2169,45 @@ function FingerKeyboard({
   );
 }
 
+// ── Typing ladder ────────────────────────────────────────────────────────────
+// Six stages of escalating difficulty. Each auto-unlocks the next once cleared,
+// so beginners start on single keys and graduate all the way to a ghost race.
+type StageId = "keys" | "words" | "pairs" | "sentence" | "speed" | "race";
+
+const STAGES: { id: StageId; label: string; emoji: string; blurb: string }[] = [
+  { id: "keys", label: "Keys", emoji: "⌨️", blurb: "One key at a time — find the home row." },
+  { id: "words", label: "Words", emoji: "🔤", blurb: "Short words, one at a time." },
+  { id: "pairs", label: "Two words", emoji: "✌️", blurb: "Two words together — keep the rhythm." },
+  { id: "sentence", label: "Sentence", emoji: "📝", blurb: "Full lines from your lesson." },
+  { id: "speed", label: "Speed", emoji: "⚡", blurb: "Type a line at 20 WPM or faster." },
+  { id: "race", label: "Race", emoji: "🏁", blurb: "Race a ghost of your best run." },
+];
+
+// Built-in mechanics content (home-row first). Sentence/Speed/Race pull from the
+// live curriculum instead, so the hard stages reinforce the actual lesson.
+const KEY_LESSONS = ["ffff jjjj", "fjfj jfjf", "dddd kkkk", "dkdk slsl", "ssss llll", "asdf jkl;"];
+const SMALL_WORDS = ["cat", "dog", "sun", "red", "big", "run", "top", "fun", "map", "hat", "yes", "new"];
+const WORD_PAIRS = ["red car", "big dog", "hot sun", "my cat", "new job", "old map", "we run", "top ten", "two dogs", "fun day"];
+
+const STAGE_XP: Record<StageId, number> = { keys: 8, words: 10, pairs: 12, sentence: 15, speed: 18, race: 22 };
+const STAGE_LEN: Record<StageId, number> = { keys: 6, words: 8, pairs: 8, sentence: 6, speed: 6, race: 6 };
+const SPEED_TARGET = 20; // WPM needed to clear the Speed stage
+const PASS_ACC = 90; // accuracy % needed to count a drill as "cleared"
+
+// The drills shown for a stage, capped to a sensible length.
+function stageDrills(id: StageId, content: string): string[] {
+  const raw =
+    id === "keys"
+      ? KEY_LESSONS
+      : id === "words"
+      ? SMALL_WORDS
+      : id === "pairs"
+      ? WORD_PAIRS
+      : drillLines(content);
+  const list = raw.slice(0, STAGE_LEN[id]);
+  return list.length ? list : ["practice"];
+}
+
 // ── Typing practice view ─────────────────────────────────────────────────────
 function TypingView({
   content,
@@ -1733,6 +2217,7 @@ function TypingView({
   t,
   dark,
   expanded,
+  progressId,
   onAward,
 }: {
   content: string;
@@ -1742,21 +2227,94 @@ function TypingView({
   t: Tokens;
   dark: boolean;
   expanded: boolean;
+  progressId: string;
   onAward: (amount: number) => void;
 }) {
-  const lines = useMemo(() => drillLines(content), [content]);
+  const { ink, ink2, fill } = t;
+
+  // Ladder progress + personal best, persisted across sessions.
+  const [prog, setProg] = useState<TypingProg>(() => loadTypingProg(progressId));
+  const [bestWpm, setBestWpm] = useState<number>(() => loadNumber(bestWpmKeyFor(progressId)));
+
+  // Land on the furthest unlocked stage so returning learners continue where
+  // they left off (a fresh learner starts on Keys).
+  const [stageIdx, setStageIdx] = useState(() => Math.min(prog.unlocked, STAGES.length - 1));
+  const stage = STAGES[stageIdx];
+
+  const items = useMemo(() => stageDrills(stage.id, content), [stage.id, content]);
+  const clearedSet = useMemo(() => new Set(prog.cleared[stage.id] ?? []), [prog, stage.id]);
+
+  // Current drill state.
   const [idx, setIdx] = useState(0);
   const [typed, setTyped] = useState("");
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [awarded, setAwarded] = useState(false);
+  const [justUnlocked, setJustUnlocked] = useState(false);
+  const [newRecord, setNewRecord] = useState(false);
+  // Race-only: 3·2·1 countdown and a ticking clock to move the ghost.
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const target = lines[idx] ?? "";
-  const { ink, ink2, fill } = t;
+  // Keys uses single-character cards, so its match target is letters only.
+  const target = stage.id === "keys" ? (items[idx] ?? "").replace(/\s+/g, "") : items[idx] ?? "";
+
+  // Reset everything when the stage changes, landing on the first drill the
+  // learner hasn't cleared yet so "Drill N of M" reflects real progress instead
+  // of always restarting at 1. Speed/Race track a single goal, so start at 0.
+  useEffect(() => {
+    const set = new Set(prog.cleared[stage.id] ?? []);
+    const firstUncleared =
+      stage.id === "speed" || stage.id === "race" ? 0 : items.findIndex((_, k) => !set.has(k));
+    setIdx(firstUncleared < 0 ? 0 : firstUncleared);
+    setTyped("");
+    setStartedAt(null);
+    setAwarded(false);
+    setCountdown(null);
+    setNewRecord(false);
+    setJustUnlocked(false);
+    // Only on stage change — prog/items are read as a snapshot here on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageIdx]);
+
+  // The next drill to practice: skip ones already cleared, wrapping around; if
+  // every drill is cleared, just advance normally so replaying still works.
+  const nextDrillIdx = () => {
+    if (stage.id === "speed" || stage.id === "race") return (idx + 1) % items.length;
+    for (let step = 1; step <= items.length; step++) {
+      const k = (idx + step) % items.length;
+      if (!clearedSet.has(k)) return k;
+    }
+    return (idx + 1) % items.length;
+  };
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, [idx]);
+    if (stage.id !== "race") inputRef.current?.focus();
+  }, [idx, stage.id]);
+
+  // Countdown driver for the race.
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      const t0 = Date.now();
+      setStartedAt(t0);
+      setNowTick(t0);
+      setTimeout(() => inputRef.current?.focus(), 0);
+      return;
+    }
+    const to = setTimeout(() => setCountdown((c) => (c ?? 0) - 1), 700);
+    return () => clearTimeout(to);
+  }, [countdown]);
+
+  // Ghost clock — only runs mid-race.
+  useEffect(() => {
+    if (stage.id !== "race" || startedAt === null) return;
+    const done = typed.length >= target.length && target.length > 0;
+    if (done) return;
+    const iv = setInterval(() => setNowTick(Date.now()), 60);
+    return () => clearInterval(iv);
+  }, [stage.id, startedAt, typed.length, target.length]);
 
   const correctChars = Array.from(typed).filter((ch, i) => ch === target[i]).length;
   const done = typed.length >= target.length && target.length > 0;
@@ -1764,24 +2322,73 @@ function TypingView({
   const minutes = startedAt ? Math.max((Date.now() - startedAt) / 60000, 0.0001) : 0;
   const wpm = startedAt ? Math.max(0, Math.round(correctChars / 5 / minutes)) : 0;
 
+  // Ghost position for the race: a steady pace set by the personal best.
+  const ghostChars =
+    stage.id === "race" && bestWpm > 0 && startedAt !== null
+      ? Math.min(target.length, Math.floor(((nowTick - startedAt) / 60000) * bestWpm * 5))
+      : 0;
+
   // Which key/finger to guide toward next.
   const nextChar = !done ? target[typed.length] : undefined;
   const guide = resolveKey(nextChar);
   const guideFinger = guide.finger ? FINGERS[guide.finger] : undefined;
   const shiftFinger = guide.shiftFinger ? FINGERS[guide.shiftFinger] : undefined;
 
+  const raceIdle = stage.id === "race" && startedAt === null && countdown === null && !done;
+
   // Expanded → scale everything up for low-vision readability.
   const sz = expanded
-    ? { colMax: 900, sentence: 32, hint: 20, combo: 15, stat: 30, statLabel: 13, btn: 20, btnPad: 18, gap: 22 }
-    : { colMax: 680, sentence: 20, hint: 14, combo: 12, stat: 18, statLabel: 11, btn: 15, btnPad: 12, gap: 16 };
+    ? { colMax: 900, sentence: 32, hint: 20, combo: 15, btn: 20, btnPad: 18, card: 66, cardF: 30 }
+    : { colMax: 680, sentence: 20, hint: 14, combo: 12, btn: 15, btnPad: 12, card: 46, cardF: 21 };
+
+  const persist = (next: TypingProg) => {
+    setProg(next);
+    saveTypingProg(progressId, next);
+  };
+
+  // Record a cleared drill and unlock the next stage when the goal is met.
+  const clearDrill = (learningTotal: number | null) => {
+    const set = new Set(prog.cleared[stage.id] ?? []);
+    set.add(stage.id === "speed" ? 0 : idx);
+    const arr = [...set];
+    const goalMet = learningTotal === null ? true : arr.length >= learningTotal;
+    let unlocked = prog.unlocked;
+    if (goalMet && stageIdx + 1 > unlocked) unlocked = stageIdx + 1;
+    if (unlocked > prog.unlocked) setJustUnlocked(true);
+    persist({ unlocked, cleared: { ...prog.cleared, [stage.id]: arr } });
+  };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.slice(0, target.length);
-    if (startedAt === null && v.length > 0) setStartedAt(Date.now());
+    // Non-race stages start the clock on the first keystroke; the race starts it
+    // when the countdown ends, so we don't reset it here.
+    if (startedAt === null && v.length > 0 && stage.id !== "race") setStartedAt(Date.now());
     setTyped(v);
-    if (v.length >= target.length && !awarded) {
+
+    if (v.length >= target.length && target.length > 0 && !awarded) {
       setAwarded(true);
-      onAward(15);
+      const correct = Array.from(v).filter((ch, i) => ch === target[i]).length;
+      const acc = Math.round((correct / v.length) * 100);
+      const at = startedAt ?? Date.now();
+      const mins = Math.max((Date.now() - at) / 60000, 0.0001);
+      const w = Math.max(0, Math.round(correct / 5 / mins));
+      onAward(STAGE_XP[stage.id]);
+
+      if (stage.id === "race") {
+        if ((bestWpm === 0 || w > bestWpm) && acc >= PASS_ACC) {
+          setBestWpm(w);
+          try {
+            window.localStorage.setItem(bestWpmKeyFor(progressId), String(w));
+          } catch {
+            /* ignore */
+          }
+          setNewRecord(true);
+        }
+      } else if (stage.id === "speed") {
+        if (w >= SPEED_TARGET && acc >= PASS_ACC) clearDrill(null);
+      } else if (acc >= PASS_ACC) {
+        clearDrill(items.length);
+      }
     }
   };
 
@@ -1790,8 +2397,24 @@ function TypingView({
     setTyped("");
     setStartedAt(null);
     setAwarded(false);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    setCountdown(null);
+    setNewRecord(false);
+    setJustUnlocked(false);
+    if (stage.id !== "race") setTimeout(() => inputRef.current?.focus(), 0);
   };
+
+  const startRace = (nextIdx: number) => {
+    setIdx(nextIdx);
+    setTyped("");
+    setStartedAt(null);
+    setAwarded(false);
+    setNewRecord(false);
+    setJustUnlocked(false);
+    setCountdown(3);
+  };
+
+  const clearedCount = clearedSet.size;
+  const stageGoal = stage.id === "speed" || stage.id === "race" ? 1 : items.length;
 
   return (
     <div
@@ -1799,215 +2422,325 @@ function TypingView({
       style={{
         flex: 1,
         overflowY: "auto",
-        padding: "20px 18px 22px",
+        padding: "16px 18px 22px",
         background: t.panelBg,
         display: "flex",
         flexDirection: "column",
       }}
     >
       <div style={{ width: "100%", maxWidth: sz.colMax, margin: "0 auto", display: "flex", flexDirection: "column" }}>
-      <div style={{ fontSize: 12, color: ink2, marginBottom: 4 }}>
-        {moduleLabel} · term {idx + 1} of {lines.length}
-      </div>
-      <div style={{ fontSize: 13, color: ink2, marginBottom: 16 }}>Type the line below exactly.</div>
-
-      {/* Target text with per-character feedback */}
-      <div
-        onClick={() => inputRef.current?.focus()}
-        style={{
-          fontSize: sz.sentence,
-          lineHeight: 1.55,
-          fontWeight: 600,
-          letterSpacing: "0.01em",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          marginBottom: 18,
-          cursor: "text",
-        }}
-      >
-        {Array.from(target).map((ch, i) => {
-          const state =
-            i < typed.length ? (typed[i] === ch ? "ok" : "bad") : i === typed.length ? "cur" : "todo";
-          return (
-            <span
-              key={i}
-              style={{
-                color:
-                  state === "ok"
-                    ? ink
-                    : state === "bad"
-                    ? "#FF3B30"
-                    : state === "cur"
-                    ? ink
-                    : t.ink3,
-                background:
-                  state === "bad"
-                    ? "rgba(255,59,48,0.14)"
-                    : state === "cur"
-                    ? `${primary}22`
-                    : "transparent",
-                borderRadius: 3,
-                boxShadow: state === "cur" ? `inset 0 -2px 0 ${primary}` : "none",
-              }}
-            >
-              {ch}
-            </span>
-          );
-        })}
-      </div>
-
-      {/* Capture keystrokes with a visually-hidden input — the sentence above
-          shows live progress, so no visible field is needed. Click the sentence
-          (or the keyboard area) to refocus. */}
-      <input
-        ref={inputRef}
-        value={typed}
-        onChange={onChange}
-        disabled={done}
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck={false}
-        aria-label="Type the sentence above"
-        style={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          opacity: 0,
-          padding: 0,
-          border: "none",
-          pointerEvents: "none",
-        }}
-      />
-
-      {/* Finger guide */}
-      <div style={{ marginTop: 18, cursor: "text" }} onClick={() => inputRef.current?.focus()}>
-        <div style={{ textAlign: "center", fontSize: sz.hint, color: ink2, marginBottom: 10 }}>
-          {done ? (
-            <span>Line complete 🎉</span>
-          ) : guide.needsShift && guideFinger && shiftFinger ? (
-            <span>
-              Hold <strong style={{ color: shiftFinger.solid }}>{shiftFinger.hand} Shift</strong> + use your{" "}
-              <strong style={{ color: guideFinger.solid }}>
-                {guideFinger.hand} {guideFinger.name}
-              </strong>
-            </span>
-          ) : guideFinger ? (
-            <span>
-              Use your{" "}
-              <strong style={{ color: guideFinger.solid }}>
-                {guide.key === "SPACE" ? "Thumb" : `${guideFinger.hand} ${guideFinger.name}`}
-              </strong>
-            </span>
-          ) : (
-            <span>&nbsp;</span>
-          )}
+        {/* ── Stage ladder ── */}
+        <div style={{ display: "flex", gap: 7, overflowX: "auto", paddingBottom: 6, marginBottom: 12 }} className="ai-tutor-scroll">
+          {STAGES.map((s, i) => {
+            const locked = i > prog.unlocked;
+            const active = i === stageIdx;
+            const cleared = i < prog.unlocked;
+            return (
+              <button
+                key={s.id}
+                className="ai-tutor-tap"
+                disabled={locked}
+                onClick={() => !locked && setStageIdx(i)}
+                title={locked ? "Clear the previous stage to unlock" : s.label}
+                style={{
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  border: "none",
+                  cursor: locked ? "not-allowed" : "pointer",
+                  borderRadius: 999,
+                  padding: "6px 12px",
+                  fontFamily: FONT,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: active ? "#fff" : locked ? t.ink3 : ink,
+                  background: active ? primary : locked ? "transparent" : fill,
+                  opacity: locked ? 0.6 : 1,
+                }}
+              >
+                <span style={{ fontSize: 13 }}>{locked ? "🔒" : cleared ? "✅" : s.emoji}</span>
+                {s.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Shift combo pill — how to produce a capital or symbol */}
-        {guide.needsShift && guide.base && (
-          <div style={{ textAlign: "center", marginBottom: 10 }}>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: sz.combo,
-                fontWeight: 600,
-                color: ink,
-                background: fill,
-                borderRadius: 999,
-                padding: "5px 12px",
-              }}
-            >
-              <kbd style={kbdStyle(t)}>Shift</kbd>
-              <span style={{ opacity: 0.6 }}>+</span>
-              <kbd style={kbdStyle(t)}>{guide.base}</kbd>
-              {nextChar && nextChar !== guide.base && (
-                <>
-                  <span style={{ opacity: 0.6 }}>→</span>
-                  <span style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{nextChar}</span>
-                </>
-              )}
-            </span>
+        {/* ── Stage header ── */}
+        <div style={{ fontSize: 12, color: ink2, marginBottom: 2 }}>
+          {stage.id === "sentence" || stage.id === "speed" || stage.id === "race" ? `${moduleLabel} · ` : ""}
+          {stage.blurb}
+        </div>
+        {stage.id !== "race" && (
+          <div style={{ fontSize: 12, color: ink2, marginBottom: 12 }}>
+            Drill {idx + 1} of {items.length} · {clearedCount}/{stageGoal} cleared
+            {stage.id === "speed" ? ` · target ${SPEED_TARGET} WPM` : ""}
           </div>
         )}
 
-        <FingerKeyboard
-          activeKey={guide.key}
-          activeShift={guide.shiftKey}
-          activeFinger={guide.finger}
-          shiftFinger={guide.shiftFinger}
-          dark={dark}
-          expanded={expanded}
+        {/* ── RACE idle: start screen ── */}
+        {raceIdle && (
+          <div style={{ textAlign: "center", padding: "18px 0 22px" }}>
+            <div style={{ fontSize: 15, color: ink2, marginBottom: 6 }}>
+              {bestWpm > 0 ? (
+                <>Your best: <strong style={{ color: ink }}>{bestWpm} WPM</strong> 🏁</>
+              ) : (
+                <>No record yet — this run sets the pace to beat.</>
+              )}
+            </div>
+            <button
+              className="ai-tutor-tap"
+              onClick={() => startRace(idx)}
+              style={{
+                border: "none",
+                cursor: "pointer",
+                borderRadius: 14,
+                padding: "14px 28px",
+                fontFamily: FONT,
+                fontSize: sz.btn + 1,
+                fontWeight: 700,
+                color: "#fff",
+                background: `linear-gradient(135deg, ${primary}, ${secondary})`,
+                boxShadow: `0 8px 20px ${primary}44`,
+              }}
+            >
+              🏁 Start race
+            </button>
+          </div>
+        )}
+
+        {/* ── RACE countdown ── */}
+        {countdown !== null && (
+          <div style={{ textAlign: "center", fontSize: expanded ? 72 : 54, fontWeight: 800, color: primary, padding: "20px 0" }}>
+            {countdown > 0 ? countdown : "Go!"}
+          </div>
+        )}
+
+        {/* ── RACE progress bars (you vs ghost) ── */}
+        {stage.id === "race" && startedAt !== null && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {[
+              { label: `You · ${wpm} WPM`, pct: target.length ? typed.length / target.length : 0, color: primary },
+              { label: bestWpm > 0 ? `Ghost · ${bestWpm} WPM` : "Ghost · —", pct: target.length ? ghostChars / target.length : 0, color: t.ink3 },
+            ].map((bar) => (
+              <div key={bar.label}>
+                <div style={{ fontSize: 11, color: ink2, marginBottom: 3 }}>{bar.label}</div>
+                <div style={{ height: 8, borderRadius: 4, background: fill, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.min(1, bar.pct) * 100}%`, height: "100%", borderRadius: 4, background: bar.color, transition: "width .12s linear" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── KEYS: single-character cards ── */}
+        {stage.id === "keys" && !raceIdle && (
+          <div
+            onClick={() => inputRef.current?.focus()}
+            style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center", marginBottom: 18, cursor: "text" }}
+          >
+            {Array.from(target).map((ch, i) => {
+              const state = i < typed.length ? (typed[i] === ch ? "ok" : "bad") : i === typed.length ? "cur" : "todo";
+              return (
+                <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div style={{ height: 16 }}>
+                    {state === "ok" && <Glyph k="check" size={15} color="#34C759" stroke={2.6} />}
+                  </div>
+                  <div
+                    style={{
+                      width: sz.card,
+                      height: sz.card,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 12,
+                      fontSize: sz.cardF,
+                      fontWeight: 700,
+                      color: state === "bad" ? "#FF3B30" : ink,
+                      background:
+                        state === "ok"
+                          ? "rgba(52,199,89,0.14)"
+                          : state === "bad"
+                          ? "rgba(255,59,48,0.14)"
+                          : state === "cur"
+                          ? t.surface
+                          : fill,
+                      border: state === "ok" ? "1.5px solid #34C759" : `1.5px solid ${state === "cur" ? primary : "transparent"}`,
+                      boxShadow: state === "cur" ? `inset 0 -3px 0 ${primary}` : "none",
+                    }}
+                  >
+                    {ch}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── WORDS / PAIRS / SENTENCE / SPEED / RACE: inline text ── */}
+        {stage.id !== "keys" && !raceIdle && countdown === null && (
+          <div
+            onClick={() => inputRef.current?.focus()}
+            style={{
+              fontSize: sz.sentence,
+              lineHeight: 1.55,
+              fontWeight: 600,
+              letterSpacing: "0.01em",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              marginBottom: 18,
+              cursor: "text",
+              textAlign: stage.id === "words" || stage.id === "pairs" ? "center" : "left",
+            }}
+          >
+            {Array.from(target).map((ch, i) => {
+              const state = i < typed.length ? (typed[i] === ch ? "ok" : "bad") : i === typed.length ? "cur" : "todo";
+              return (
+                <span
+                  key={i}
+                  style={{
+                    color: state === "bad" ? "#FF3B30" : state === "todo" ? t.ink3 : ink,
+                    background: state === "bad" ? "rgba(255,59,48,0.14)" : state === "cur" ? `${primary}22` : "transparent",
+                    borderRadius: 3,
+                    boxShadow: state === "cur" ? `inset 0 -2px 0 ${primary}` : "none",
+                  }}
+                >
+                  {ch}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Hidden capture input — the display above shows live progress. */}
+        <input
+          ref={inputRef}
+          value={typed}
+          onChange={onChange}
+          disabled={done || raceIdle || countdown !== null}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-label="Type the sentence above"
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0, padding: 0, border: "none", pointerEvents: "none" }}
         />
-      </div>
 
-      {/* Stats */}
-      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-        <TypingStat value={String(wpm)} label="WPM" t={t} big={expanded} />
-        <TypingStat value={`${accuracy}%`} label="Accuracy" t={t} big={expanded} />
-        <TypingStat value={`${typed.length}/${target.length}`} label="Chars" t={t} big={expanded} />
-      </div>
+        {/* Finger guide (hidden on the race start screen / countdown) */}
+        {!raceIdle && countdown === null && (
+          <div style={{ marginTop: 4, cursor: "text" }} onClick={() => inputRef.current?.focus()}>
+            <div style={{ textAlign: "center", fontSize: sz.hint, color: ink2, marginBottom: 10 }}>
+              {done ? (
+                <span>Line complete 🎉</span>
+              ) : guide.needsShift && guideFinger && shiftFinger ? (
+                <span>
+                  Hold <strong style={{ color: shiftFinger.solid }}>{shiftFinger.hand} Shift</strong> + use your{" "}
+                  <strong style={{ color: guideFinger.solid }}>
+                    {guideFinger.hand} {guideFinger.name}
+                  </strong>
+                </span>
+              ) : guideFinger ? (
+                <span>
+                  Use your{" "}
+                  <strong style={{ color: guideFinger.solid }}>
+                    {guide.key === "SPACE" ? "Thumb" : `${guideFinger.hand} ${guideFinger.name}`}
+                  </strong>
+                </span>
+              ) : (
+                <span>&nbsp;</span>
+              )}
+            </div>
 
-      {done && (
-        <div
-          style={{
-            marginTop: 18,
-            padding: "12px 16px",
-            borderRadius: 14,
-            background: `linear-gradient(135deg, ${primary}, ${secondary})`,
-            color: "#fff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            animation: "ai-tutor-pop .28s cubic-bezier(.22,1,.36,1)",
-          }}
-        >
-          <span style={{ fontSize: 15, fontWeight: 700 }}>Nice — +15 XP</span>
-          <span style={{ fontSize: 13, opacity: 0.9 }}>
-            {wpm} WPM · {accuracy}%
-          </span>
+            {guide.needsShift && guide.base && (
+              <div style={{ textAlign: "center", marginBottom: 10 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: sz.combo, fontWeight: 600, color: ink, background: fill, borderRadius: 999, padding: "5px 12px" }}>
+                  <kbd style={kbdStyle(t)}>Shift</kbd>
+                  <span style={{ opacity: 0.6 }}>+</span>
+                  <kbd style={kbdStyle(t)}>{guide.base}</kbd>
+                  {nextChar && nextChar !== guide.base && (
+                    <>
+                      <span style={{ opacity: 0.6 }}>→</span>
+                      <span style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{nextChar}</span>
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
+
+            <FingerKeyboard
+              activeKey={guide.key}
+              activeShift={guide.shiftKey}
+              activeFinger={guide.finger}
+              shiftFinger={guide.shiftFinger}
+              dark={dark}
+              expanded={expanded}
+            />
+          </div>
+        )}
+
+        {/* Stats */}
+        <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+          <TypingStat value={String(wpm)} label="WPM" t={t} big={expanded} />
+          <TypingStat value={`${accuracy}%`} label="Accuracy" t={t} big={expanded} />
+          <TypingStat value={`${typed.length}/${target.length}`} label="Chars" t={t} big={expanded} />
         </div>
-      )}
 
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button
-          className="ai-tutor-tap"
-          onClick={() => reset(idx)}
-          style={{
-            flex: 1,
-            border: "none",
-            cursor: "pointer",
-            borderRadius: 13,
-            padding: sz.btnPad,
-            fontFamily: FONT,
-            fontSize: sz.btn,
-            fontWeight: 600,
-            color: primary,
-            background: fill,
-          }}
-        >
-          Restart
-        </button>
-        <button
-          className="ai-tutor-tap"
-          onClick={() => reset((idx + 1) % lines.length)}
-          style={{
-            flex: 1,
-            border: "none",
-            cursor: "pointer",
-            borderRadius: 13,
-            padding: sz.btnPad,
-            fontFamily: FONT,
-            fontSize: sz.btn,
-            fontWeight: 600,
-            color: "#fff",
-            background: primary,
-          }}
-        >
-          Next term
-        </button>
-      </div>
+        {/* Completion banner */}
+        {done && (
+          <div
+            style={{
+              marginTop: 18,
+              padding: "12px 16px",
+              borderRadius: 14,
+              background: `linear-gradient(135deg, ${primary}, ${secondary})`,
+              color: "#fff",
+              animation: "ai-tutor-pop .28s cubic-bezier(.22,1,.36,1)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Nice — +{STAGE_XP[stage.id]} XP</span>
+              <span style={{ fontSize: 13, opacity: 0.9 }}>
+                {wpm} WPM · {accuracy}%
+              </span>
+            </div>
+            <div style={{ fontSize: 13, marginTop: 4, opacity: 0.95 }}>
+              {stage.id === "race"
+                ? newRecord
+                  ? `🏁 New record: ${bestWpm} WPM!`
+                  : bestWpm > 0
+                  ? `Best: ${bestWpm} WPM — keep chasing it.`
+                  : "Run complete."
+                : justUnlocked
+                ? `🔓 Stage cleared! Unlocked ${STAGES[Math.min(stageIdx + 1, STAGES.length - 1)].label}.`
+                : stage.id === "speed"
+                ? accuracy >= PASS_ACC && wpm >= SPEED_TARGET
+                  ? "⚡ Target hit!"
+                  : `Hit ${SPEED_TARGET} WPM at ${PASS_ACC}%+ to clear.`
+                : accuracy >= PASS_ACC
+                ? "Drill cleared ✓"
+                : `Aim for ${PASS_ACC}%+ accuracy to clear this drill.`}
+            </div>
+          </div>
+        )}
+
+        {/* Actions */}
+        {!raceIdle && countdown === null && (
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <button
+              className="ai-tutor-tap"
+              onClick={() => (stage.id === "race" ? startRace(idx) : reset(idx))}
+              style={{ flex: 1, border: "none", cursor: "pointer", borderRadius: 13, padding: sz.btnPad, fontFamily: FONT, fontSize: sz.btn, fontWeight: 600, color: primary, background: fill }}
+            >
+              {stage.id === "race" ? "Race again" : "Restart"}
+            </button>
+            <button
+              className="ai-tutor-tap"
+              onClick={() => reset(nextDrillIdx())}
+              style={{ flex: 1, border: "none", cursor: "pointer", borderRadius: 13, padding: sz.btnPad, fontFamily: FONT, fontSize: sz.btn, fontWeight: 600, color: "#fff", background: primary }}
+            >
+              {stage.id === "race" ? "New line" : stage.id === "keys" ? "Next drill" : "Next"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

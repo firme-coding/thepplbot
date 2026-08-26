@@ -16,12 +16,32 @@ import type { ReactNode } from "react";
  */
 export type Theme = "light" | "dark" | "auto";
 
+/**
+ * A checkpoint quiz that gates the next module. The learner must first *type out*
+ * the question (typing-along), then pick the correct multiple-choice answer.
+ * Passing it unlocks the following topic.
+ */
+export interface CheckpointQuiz {
+  /** The question the learner types out, then answers. */
+  question: string;
+  /** Multiple-choice options shown after the question is typed. */
+  options: string[];
+  /** Index into `options` of the correct answer. */
+  answer: number;
+}
+
 /** A single curriculum module */
 export interface CurriculumModule {
   /** Display name shown in the module selector dropdown */
   label: string;
   /** The curriculum content the AI uses as context */
   content: string;
+  /**
+   * Optional gate. When set, this module's checkpoint must be passed before the
+   * NEXT module unlocks. If omitted, the widget generates a simple checkpoint
+   * from the module content so gating still works out of the box.
+   */
+  checkpoint?: CheckpointQuiz;
 }
 
 /** Full curriculum passed to the tutor */
@@ -165,6 +185,15 @@ export interface AITutorProps extends BrandConfig {
    * ✕ so learners can close it.)
    */
   launcherIcon?: ReactNode;
+  /**
+   * Custom icon shown in the chat screen's empty state (before the first
+   * question). Pass:
+   *   • an image URL / path — `chatIcon="/mascot.png"` → rendered as an <img>
+   *   • an emoji or short text — `chatIcon="👋"`
+   *   • any React node — `chatIcon={<MyIcon />}`
+   * Falls back to `logoUrl`, then the built-in chat glyph.
+   */
+  chatIcon?: ReactNode;
   /**
    * The signed-in learner (id, name, gameName). Pass this from your platform.
    * `name` is used to address the learner; `gameName` shows in the UI; `id`
